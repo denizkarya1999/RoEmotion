@@ -48,15 +48,19 @@ class LocalInferenceActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "LocalInferenceActivity"
 
+        // Picker mode for deciding whether current selection is YOLO or ResNet
         private const val PICK_MODE_YOLO = 1
         private const val PICK_MODE_RESNET = 2
 
+        // Input can be either a folder tree or a zip file
         private const val INPUT_TYPE_TREE = 1
         private const val INPUT_TYPE_ZIP = 2
 
+        // Fixed YOLO input size used by the TFLite model
         private const val YOLO_INPUT_W = 640
         private const val YOLO_INPUT_H = 640
 
+        // ResNet sequence model uses a fixed number of frames
         private const val RESNET_SEQUENCE_LENGTH = 5
     }
 
@@ -78,14 +82,17 @@ class LocalInferenceActivity : AppCompatActivity() {
     private var yoloInput: PickedInput? = null
     private var resnetInput: PickedInput? = null
 
+    // Cached model instances
     private var yoloInterpreter: Interpreter? = null
     private var pytorchClassifier: PyTorchClassifier? = null
 
+    // Folder picker
     private val openDatasetTreeLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri == null) return@registerForActivityResult
 
             try {
+                // Persist read permission for future access
                 contentResolver.takePersistableUriPermission(
                     uri,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -107,11 +114,13 @@ class LocalInferenceActivity : AppCompatActivity() {
             }
         }
 
+    // ZIP file picker
     private val openZipFileLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@registerForActivityResult
 
             try {
+                // Persist read permission for future access
                 contentResolver.takePersistableUriPermission(
                     uri,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -135,6 +144,8 @@ class LocalInferenceActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Keep device awake and lock activity to portrait
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 
@@ -307,6 +318,7 @@ class LocalInferenceActivity : AppCompatActivity() {
         forMode: Int,
         progressUi: ProgressUi
     ): PreparedRoot = withContext(Dispatchers.IO) {
+        // Temporary working folder used for copied or extracted data
         val tempRoot = File(cacheDir, "local_inference_inputs").apply { mkdirs() }
         val workDir = File(tempRoot, "${System.currentTimeMillis()}_${UUID.randomUUID()}").apply { mkdirs() }
 
@@ -326,6 +338,7 @@ class LocalInferenceActivity : AppCompatActivity() {
 
         updateProgress(progressUi, 2, 4, "Locating dataset root")
 
+        // Detect the actual dataset root after extraction/copy
         val detectedRoot = when (forMode) {
             PICK_MODE_YOLO -> findLikelyYoloDatasetRoot(workDir)
             PICK_MODE_RESNET -> findLikelyResNetDatasetRoot(workDir)
@@ -366,6 +379,7 @@ class LocalInferenceActivity : AppCompatActivity() {
         val destPath = destinationDir.canonicalPath
         val outPath = outFile.canonicalPath
 
+        // Prevent zip-slip path traversal
         if (!outPath.startsWith(destPath + File.separator) && outPath != destPath) {
             throw SecurityException("Blocked unsafe ZIP entry: $entryName")
         }
@@ -409,6 +423,7 @@ class LocalInferenceActivity : AppCompatActivity() {
     }
 
     private fun isYoloDatasetRoot(dir: File): Boolean {
+        // YOLO root must have a yaml file with class/split information
         val yamlExists = File(dir, "data.yaml").exists() ||
                 File(dir, "dataset.yaml").exists() ||
                 dir.listFiles()?.any {
@@ -417,10 +432,12 @@ class LocalInferenceActivity : AppCompatActivity() {
 
         if (!yamlExists) return false
 
+        // Roboflow style: train/images, valid/images, test/images
         val hasRoboflowStyleSplits = listOf("train", "valid", "val", "test").any { split ->
             File(dir, "$split/images").isDirectory
         }
 
+        // Classic style: images/train, images/val, images/test
         val hasClassicYoloStyleSplits =
             File(dir, "images").isDirectory &&
                     listOf("train", "valid", "val", "test").any { split ->
@@ -458,6 +475,7 @@ class LocalInferenceActivity : AppCompatActivity() {
 
                 updateProgress(progressUi, 3, 4, "Reading dataset")
 
+                // Read YAML once, then use it for class names and split paths
                 val yamlText = readBestYoloYamlText(datasetRoot)
                     ?: throw IllegalStateException("Could not read data.yaml / dataset.yaml.")
 
@@ -474,10 +492,12 @@ class LocalInferenceActivity : AppCompatActivity() {
 
                 val interpreter = getOrCreateYoloInterpreter()
 
+                // Per-class statistics
                 val perClassGt = IntArray(classNames.size)
                 val perClassCorrect = IntArray(classNames.size)
                 val imageLevelCorrect = AtomicInteger(0)
 
+                // Per-split statistics
                 val splitGtCounts = linkedMapOf<String, Int>()
                 val splitCorrectCounts = linkedMapOf<String, Int>()
                 val splitImageFullMatchCounts = linkedMapOf<String, Int>()
@@ -503,6 +523,7 @@ class LocalInferenceActivity : AppCompatActivity() {
                         processed++
                         updateProgress(progressUi, processed, totalImages, "YOLO inferring ${split.splitName}")
 
+                        // Ground-truth class ids from YOLO label txt
                         val gtClassIds = readYoloGroundTruthClassIds(split.labelsFolder, imageFile)
                         gtClassIds.forEach { classId ->
                             if (classId in perClassGt.indices) {
@@ -519,6 +540,7 @@ class LocalInferenceActivity : AppCompatActivity() {
                             continue
                         }
 
+                        // Prediction returns multiple detections, so keep unique class ids
                         val predictedClassIds = runSingleYoloInference(bitmap, interpreter)
                             .map { it.classId }
                             .distinct()
@@ -527,6 +549,7 @@ class LocalInferenceActivity : AppCompatActivity() {
                         val imageGtSet = gtClassIds.toSet()
                         val imagePredSet = predictedClassIds.toSet()
 
+                        // Image is counted as full match only if all GT classes are predicted
                         var imageMatchedAll = imageGtSet.isNotEmpty()
 
                         for (gtClass in imageGtSet) {
@@ -657,6 +680,7 @@ class LocalInferenceActivity : AppCompatActivity() {
     }
 
     private fun collectYoloSplitFiles(root: File, yamlText: String): List<YoloSplitInfo> {
+        // Split paths can come from YAML or from common folder patterns
         val yamlSplitPaths = parseYoloSplitPathsFromYaml(yamlText)
 
         val orderedSplits = listOf("train", "val", "valid", "validation", "test", "testing")
@@ -729,6 +753,7 @@ class LocalInferenceActivity : AppCompatActivity() {
         val regex = Regex("""^\s*(train|val|test)\s*:\s*(.+?)\s*$""", RegexOption.IGNORE_CASE)
 
         yamlText.lines().forEach { rawLine ->
+            // Ignore YAML comments when parsing split paths
             val line = rawLine.substringBefore("#").trim()
             val match = regex.find(line) ?: return@forEach
             val key = match.groupValues[1].lowercase(Locale.US)
@@ -749,6 +774,7 @@ class LocalInferenceActivity : AppCompatActivity() {
 
         if (cleaned.isBlank()) return null
 
+        // Normalize simple relative prefixes
         val normalizedRelative = cleaned
             .removePrefix("./")
             .removePrefix("../")
@@ -768,6 +794,7 @@ class LocalInferenceActivity : AppCompatActivity() {
         val name = imagesFolder.name.lowercase(Locale.US)
         val parent = imagesFolder.parentFile ?: return null
 
+        // For split/images -> split/labels
         if (name == "images") {
             val sibling = File(parent, "labels")
             if (sibling.exists() && sibling.isDirectory) return sibling
@@ -784,6 +811,7 @@ class LocalInferenceActivity : AppCompatActivity() {
         val parentName = imagesFolder.parentFile?.name?.lowercase(Locale.US)
         val folderName = imagesFolder.name.lowercase(Locale.US)
 
+        // Normalize different aliases into consistent split names
         return when {
             parentName == "valid" || folderName == "valid" || requestedSplitName == "valid" || requestedSplitName == "validation" -> "valid"
             parentName == "val" || folderName == "val" -> "val"
@@ -809,6 +837,7 @@ class LocalInferenceActivity : AppCompatActivity() {
     private fun parseYamlNames(yamlText: String): List<String> {
         val lines = yamlText.lines()
 
+        // names: [a, b, c]
         val inlineNamesRegex = Regex("""^\s*names\s*:\s*\[(.*)]\s*$""")
         for (line in lines) {
             val match = inlineNamesRegex.find(line)
@@ -820,6 +849,9 @@ class LocalInferenceActivity : AppCompatActivity() {
             }
         }
 
+        // names:
+        //   0: angry
+        //   1: happy
         val blockMapStartIndex = lines.indexOfFirst { it.trim().startsWith("names:") }
         if (blockMapStartIndex >= 0) {
             val namesMap = mutableListOf<String>()
@@ -836,6 +868,9 @@ class LocalInferenceActivity : AppCompatActivity() {
             if (namesMap.isNotEmpty()) return namesMap
         }
 
+        // names:
+        //   - angry
+        //   - happy
         if (blockMapStartIndex >= 0) {
             val namesList = mutableListOf<String>()
             for (i in (blockMapStartIndex + 1) until lines.size) {
@@ -871,6 +906,7 @@ class LocalInferenceActivity : AppCompatActivity() {
     }
 
     private fun runSingleYoloInference(bitmap: Bitmap, interpreter: Interpreter): List<YoloDet> {
+        // Resize/pad image to the model input size
         val meta = YOLO_LED_Detection.createLetterboxedBitmap(
             srcBitmap = bitmap,
             targetWidth = YOLO_INPUT_W,
@@ -1119,6 +1155,7 @@ class LocalInferenceActivity : AppCompatActivity() {
             val relative = dir.relativeTo(root).invariantSeparatorsPath
             val parts = relative.split("/").filter { it.isNotBlank() }
 
+            // Infer split and class label from directory structure
             val splitName = parts.firstOrNull { it.lowercase(Locale.US) in splitNames } ?: "unknown"
             val gtLabel = inferGroundTruthLabelFromPath(parts, splitNames, dir)
 
@@ -1160,6 +1197,7 @@ class LocalInferenceActivity : AppCompatActivity() {
             frames.size == targetLength -> frames
 
             frames.size > targetLength -> {
+                // Uniformly sample frames if sequence is longer than expected
                 val result = mutableListOf<Bitmap>()
                 for (i in 0 until targetLength) {
                     val index = ((i.toFloat() / targetLength.toFloat()) * frames.size.toFloat())
@@ -1171,6 +1209,7 @@ class LocalInferenceActivity : AppCompatActivity() {
             }
 
             else -> {
+                // Pad sequence by repeating the last frame
                 val result = frames.toMutableList()
                 while (result.size < targetLength) {
                     result += frames.last()
@@ -1223,6 +1262,7 @@ class LocalInferenceActivity : AppCompatActivity() {
     }
 
     private fun normalizeLabel(label: String): String {
+        // Normalize labels for safer comparison
         return label.trim()
             .lowercase(Locale.US)
             .replace("-", " ")
@@ -1314,6 +1354,7 @@ class LocalInferenceActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
 
+        // Release model resources
         try {
             yoloInterpreter?.close()
         } catch (_: Exception) {
