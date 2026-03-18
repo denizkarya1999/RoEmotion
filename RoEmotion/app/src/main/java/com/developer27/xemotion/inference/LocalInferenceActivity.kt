@@ -540,11 +540,15 @@ class LocalInferenceActivity : AppCompatActivity() {
                             continue
                         }
 
-                        // Prediction returns multiple detections, so keep unique class ids
-                        val predictedClassIds = runSingleYoloInference(bitmap, interpreter)
-                            .map { it.classId }
-                            .distinct()
-                            .sorted()
+                        // Prediction returns multiple detections, so keep only the class
+                        // with the highest confidence score for this frame
+                        val detections = runSingleYoloInference(bitmap, interpreter)
+
+                        val bestDetection = detections.maxByOrNull { it.objConf }
+
+                        val predictedClassIds = bestDetection
+                            ?.let { listOf(it.classId) }
+                            ?: emptyList()
 
                         val imageGtSet = gtClassIds.toSet()
                         val imagePredSet = predictedClassIds.toSet()
