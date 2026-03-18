@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="shutter_speed_options">
+        <item>5 Hz</item>
+        <item>10 Hz</item>
+        <item>15 Hz</item>
+        <item>50 Hz</item>
+        <item>100 Hz</item>
+        <item>200 Hz</item>
+        <item>250 Hz</item>
+        <item>500 Hz</item>
+        <item>650 Hz</item>
+        <item>750 Hz</item>
+        <item>800 Hz</item>
+        <item>900 Hz</item>
+        <item>950 Hz</item>
+        <item>1000 Hz</item>
+        <item>2000 Hz</item>
+        <item>3000 Hz</item>
+        <item>4000 Hz</item>
+        <item>5000 Hz</item>
+        <item>6000 Hz</item>
+    </string-array>
+
+    <string-array name="shutter_speed_values">
+        <item>5</item>
+        <item>10</item>
+        <item>15</item>
+        <item>50</item>
+        <item>100</item>
+        <item>200</item>
+        <item>250</item>
+        <item>500</item>
+        <item>650</item>
+        <item>750</item>
+        <item>800</item>
+        <item>900</item>
+        <item>950</item>
+        <item>1000</item>
+        <item>2000</item>
+        <item>3000</item>
+        <item>4000</item>
+        <item>5000</item>
+        <item>6000</item>
+    </string-array>
+
+    <string-array name="detection_mode_options">
+        <item>CONTOUR</item>
+        <item>YOLO</item>
+    </string-array>
+    <string-array name="detection_mode_values">
+        <item>CONTOUR</item>
+        <item>YOLO</item>
+    </string-array>
+
+    <string-array name="max_boxes_entries">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+    <string-array name="max_boxes_values">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+</resources>

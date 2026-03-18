@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Updated activity_main.xml:
+    - A single RadioButton (radioToggle) on the left that toggles between "Digits" and "Letters".
+    - Settings and About buttons arranged horizontally (next to each other) on the right.
+    - All controls are centered horizontally.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/preview_frame"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <!-- Camera Preview using TextureView -->
+    <TextureView
+        android:id="@+id/viewFinder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- ImageView for displaying processed frames -->
+
+    <!-- Title Bar (Icon + Title) -->
+    <ImageView
+        android:id="@+id/processedFrameView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0.8"
+        android:scaleType="centerCrop"
+        android:visibility="visible" />
+
+    <LinearLayout
+        android:id="@+id/title_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:background="@color/darkBlue"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp"
+        android:elevation="4dp">
+
+        <!-- Icon (ImageButton) -->
+        <ImageButton
+            android:id="@+id/iconImageButton"
+            android:layout_width="58dp"
+            android:layout_height="58dp"
+            android:background="@android:color/transparent"
+            android:src="@drawable/xemotion_logo"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true"
+            android:contentDescription="@string/switch_camera" />
+
+        <!-- Title Text -->
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="RoEmotion"
+            android:textSize="44sp"
+            android:textColor="@color/yellow"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:paddingStart="8dp" />
+    </LinearLayout>
+
+    <!-- Top Controls Container: RadioButton on the left, and Settings/About buttons side-by-side on the right -->
+    <LinearLayout
+        android:id="@+id/top_controls_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="90dp">
+
+        <!-- Horizontal container for Settings and About Buttons -->
+        <LinearLayout
+            android:id="@+id/settings_about_container"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <!-- AR/CV Mode Toggle Button -->
+            <Button
+                android:id="@+id/arModeButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="AR Mode"
+                android:textSize="16sp"
+                android:layout_margin="8dp"
+                android:backgroundTint="@color/green"
+                android:textColor="@android:color/white"
+                android:elevation="2dp" />
+
+
+            <!-- Settings Button (standard margin) -->
+            <Button
+                android:id="@+id/settingsButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Settings"
+                android:textSize="16sp"
+                android:layout_margin="8dp"
+                android:backgroundTint="@color/yellow"
+                android:textColor="@color/darkBlue"
+                android:elevation="2dp" />
+
+            <!-- About Button with right margin of 16dp -->
+            <Button
+                android:id="@+id/aboutButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="About"
+                android:textSize="16sp"
+                android:layout_margin="8dp"
+                android:layout_marginEnd="16dp"
+                android:backgroundTint="@color/yellow"
+                android:textColor="@color/darkBlue"
+                android:elevation="2dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Zoom Buttons Container (placed on the right side) -->
+    <LinearLayout
+        android:id="@+id/zoom_button_container"
+        android:layout_width="75dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="16dp"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <!-- Zoom In Button -->
+        <Button
+            android:id="@+id/zoomInButton"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:layout_marginBottom="16dp"
+            android:backgroundTint="@color/yellow"
+            android:elevation="2dp"
+            android:text="+"
+            android:textColor="@color/darkBlue"
+            android:textSize="24sp" />
+
+        <!-- Zoom Out Button -->
+        <Button
+            android:id="@+id/zoomOutButton"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:layout_marginBottom="16dp"
+            android:backgroundTint="@color/yellow"
+            android:elevation="2dp"
+            android:text="-"
+            android:textColor="@color/darkBlue"
+            android:textSize="24sp" />
+
+        <!-- Clear Prediction Button ("C") -->
+        <Button
+            android:id="@+id/clearPredictionButton"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:layout_marginBottom="16dp"
+            android:backgroundTint="@color/red"
+            android:elevation="2dp"
+            android:text="C"
+            android:textColor="@android:color/white"
+            android:textSize="24sp" />
+
+        <!-- Local Inference Button ("I") -->
+        <Button
+            android:id="@+id/localInferenceButton"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:backgroundTint="@android:color/holo_blue_light"
+            android:elevation="2dp"
+            android:text="Z"
+            android:textColor="@android:color/white"
+            android:textSize="24sp" />
+
+    </LinearLayout>
+
+    <!-- Bottom Controls -->
+    <LinearLayout
+        android:id="@+id/button_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_gravity="center_horizontal|bottom"
+        android:layout_marginBottom="50dp">
+
+        <!-- Start Tracking Button -->
+        <Button
+            android:id="@+id/startProcessingButton"
+            android:layout_width="110dp"
+            android:layout_height="110dp"
+            android:backgroundTint="@color/blue"
+            android:elevation="2dp"
+            android:text="Start Tracking"
+            android:textColor="@android:color/white"
+            android:layout_marginEnd="16dp" />
+
+        <!-- Switch Camera Button -->
+        <Button
+            android:id="@+id/switchCameraButton"
+            android:layout_width="110dp"
+            android:layout_height="110dp"
+            android:text="Switch Camera"
+            android:textColor="@color/darkBlue"
+            android:textSize="16sp"
+            android:backgroundTint="@color/yellow"
+            android:elevation="2dp" />
+    </LinearLayout>
+
+</FrameLayout>

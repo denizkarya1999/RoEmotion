@@ -1,0 +1,18 @@
+venv/
+/YOLOv8/Tools/.vscode
+/YOLOv8/Tools/MYvenv
+/YOLOv8/Tools/Model_Conversion/MYvenv
+/YOLOv8/Tools/TFLite_Benchmark/venv
+/YOLOv8/Tools/PyTorch_Benchmark/venv
+/YOLOv8/Tools/BoundBoxPython/myenv
+/digitEnv
+/10000 DIDA
+venv/
+env/
+.myenv/
+*/venv/
+*/env/
+*/.venv/
+build/
+.gradle/
+*/build/

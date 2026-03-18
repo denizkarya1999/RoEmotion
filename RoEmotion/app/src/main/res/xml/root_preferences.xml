@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen
+    xmlns:android="http://schemas.android.com/apk/res/android">
+    <PreferenceCategory
+        android:title="Camera Settings"
+        android:layout="@layout/preference_category_layout">
+
+        <!-- Rolling Shutter Speed Preference -->
+        <ListPreference
+            android:key="shutter_speed"
+            android:layout="@layout/preference_list_layout"
+            android:title="Rolling Shutter Speed"
+            android:summary="Select the rolling shutter speed (in Hz)"
+            android:entries="@array/shutter_speed_options"
+            android:entryValues="@array/shutter_speed_values"
+            android:defaultValue="60" />
+
+        <!-- Optional: Explicitly toggle manual ISO usage -->
+        <SwitchPreference
+            android:key="manual_iso_enabled"
+            android:layout="@layout/preference_list_layout"
+            android:title="Manual ISO"
+            android:summaryOn="Use the ISO value below"
+            android:summaryOff="Let the camera choose ISO"
+            android:defaultValue="true" />
+
+        <!-- User-entered ISO -->
+        <EditTextPreference
+            android:key="iso_value"
+            android:layout="@layout/preference_list_layout"
+            android:title="ISO"
+            android:summary="Enter ISO (e.g., 100–6400)"
+            android:defaultValue="800"
+            android:dialogTitle="Set ISO"
+            android:inputType="number" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="Detection Settings"
+        android:layout="@layout/preference_category_layout">
+
+        <!-- Detection Mode Preference -->
+        <ListPreference
+            android:key="detection_mode"
+            android:layout="@layout/preference_list_layout"
+            android:title="Detection Mode"
+            android:summary="Choose between Contour and YOLO detection"
+            android:entries="@array/detection_mode_options"
+            android:entryValues="@array/detection_mode_values"
+            android:defaultValue="CONTOUR" />
+
+        <!-- Bounding Box Enable Preference -->
+        <SwitchPreference
+            android:key="enable_bounding_box"
+            android:layout="@layout/preference_list_layout"
+            android:title="Enable Emotion Labeling"
+            android:summaryOn="Yes"
+            android:summaryOff="No"
+            android:defaultValue="true" />
+
+        <ListPreference
+            android:key="max_boxes"
+            android:layout="@layout/preference_list_layout"
+            android:title="Max Bounding Boxes"
+            android:summary="Limit the number of user boxes per frame"
+            android:entries="@array/max_boxes_entries"
+            android:entryValues="@array/max_boxes_values"
+            android:defaultValue="3" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="Tracing Settings"
+        android:layout="@layout/preference_category_layout">
+
+        <!-- Enable RAW Trace -->
+        <SwitchPreference
+            android:key="enable_raw_trace"
+            android:layout="@layout/preference_list_layout"
+            android:title="Enable RAW Trace"
+            android:summaryOn="Yes"
+            android:summaryOff="No"
+            android:defaultValue="false" />
+
+        <!-- Enable SPLINE Trace -->
+        <SwitchPreference
+            android:key="enable_spline_trace"
+            android:layout="@layout/preference_list_layout"
+            android:title="Enable SPLINE Trace"
+            android:summaryOn="Yes"
+            android:summaryOff="No"
+            android:defaultValue="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="Export Data"
+        android:layout="@layout/preference_category_layout">
+
+        <SwitchPreference
+            android:key="frame_img"
+            android:layout="@layout/preference_list_layout"
+            android:title="Save 28x28 IMG"
+            android:summaryOn="Yes"
+            android:summaryOff="No"
+            android:defaultValue="false" />
+
+        <!-- New: Prediction Logging -->
+        <SwitchPreference
+            android:key="enable_prediction_logging"
+            android:layout="@layout/preference_list_layout"
+            android:title="Enable Prediction Logging"
+            android:summaryOn="Log each prediction to file"
+            android:summaryOff="Do not log predictions"
+            android:defaultValue="false" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

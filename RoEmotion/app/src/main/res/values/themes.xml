@@ -1,0 +1,17 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Splash screen theme -->
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/darkBlue</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/xemotion_logo</item>
+        <item name="windowSplashScreenAnimationDuration">200</item>
+        <item name="postSplashScreenTheme">@style/Theme.Xemotion</item>
+    </style>
+
+    <!-- Base application theme. -->
+    <style name="Base.Theme.Xemotion" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize your light theme here. -->
+        <item name="colorPrimary">@color/darkBlue</item>
+    </style>
+
+    <style name="Theme.Xemotion" parent="Base.Theme.Xemotion" />
+</resources>
