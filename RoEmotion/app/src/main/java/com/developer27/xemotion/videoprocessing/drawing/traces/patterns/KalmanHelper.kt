@@ -1,4 +1,4 @@
-package com.developer27.xemotion.videoprocessing.VideoDrawing.Traces.TracePatterns
+package com.developer27.xemotion.videoprocessing.drawing.traces.patterns
 
 import org.opencv.core.CvType
 import org.opencv.core.Mat

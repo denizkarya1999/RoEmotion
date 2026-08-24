@@ -1,15 +1,17 @@
 package com.developer27.xemotion
 
-import android.content.Intent
-import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
+import androidx.preference.MultiSelectListPreference
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreference
+import com.developer27.xemotion.ui.applySystemBarPadding
+import com.developer27.xemotion.ui.enableRoEmotionEdgeToEdge
 import com.developer27.xemotion.videoprocessing.Settings
 
 class SettingsActivity : AppCompatActivity() {
@@ -17,14 +19,14 @@ class SettingsActivity : AppCompatActivity() {
     // Initialize activity and load settings UI
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Disable screen rotation (lock to portrait)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        enableRoEmotionEdgeToEdge()
 
         // Prevent screen hibernation (keep screen on)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         // Use the updated layout with a fixed header.
         setContentView(R.layout.settings_activity)
+        findViewById<android.view.View>(R.id.settings_root).applySystemBarPadding()
 
         // Attach SettingsFragment to display preference UI inside the container
         supportFragmentManager
@@ -38,10 +40,31 @@ class SettingsActivity : AppCompatActivity() {
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
             // Load preferences from the XML resource.
             setPreferencesFromResource(R.xml.root_preferences, rootKey)
+            preferenceManager.sharedPreferences?.let(Settings::load)
+
+            val operatingModePref = findPreference<ListPreference>(Settings.KEY_OPERATING_MODE)
+            operatingModePref?.setOnPreferenceChangeListener { _, newValue ->
+                val mode = runCatching {
+                    Settings.OperatingMode.Mode.valueOf(newValue as String)
+                }.getOrDefault(Settings.OperatingMode.Mode.INFERENCE)
+                Settings.applyOperatingMode(mode)
+                updateModeSpecificPreferences(mode)
+                Toast.makeText(
+                    context,
+                    if (mode == Settings.OperatingMode.Mode.DATA_COLLECTION) {
+                        "Data Collection Mode: contour tracking and automatic trace export"
+                    } else {
+                        "Inference Mode: YOLO, ResNet-50, and AR"
+                    },
+                    Toast.LENGTH_LONG
+                ).show()
+                true
+            }
 
             // Rolling Shutter Speed listener.
             val shutterSpeedPref = findPreference<ListPreference>("shutter_speed")
             shutterSpeedPref?.setOnPreferenceChangeListener { _, newValue ->
+                Settings.RollingShutter.speedHz = newValue.toString().toFloatOrNull() ?: 60f
                 // For example, update your global shutter speed setting here.
                 Toast.makeText(
                     context,
@@ -52,10 +75,16 @@ class SettingsActivity : AppCompatActivity() {
             }
 
             // ISO numeric input preference.
+            val manualIsoPref = findPreference<SwitchPreference>("manual_iso_enabled")
             val isoPref = findPreference<EditTextPreference>("iso_value")
             isoPref?.setOnBindEditTextListener { edit ->
                 // numeric only from XML; optionally add min/max hints
                 edit.hint = "100–6400"
+            }
+            isoPref?.isEnabled = manualIsoPref?.isChecked == true
+            manualIsoPref?.setOnPreferenceChangeListener { _, newValue ->
+                isoPref?.isEnabled = newValue as? Boolean == true
+                true
             }
 
             // Parse ISO input, enforce safe range, and store value
@@ -77,30 +106,6 @@ class SettingsActivity : AppCompatActivity() {
                     Toast.makeText(context, "ISO set to $clamped", Toast.LENGTH_SHORT).show()
                     true
                 }
-            }
-
-            // Detection mode listener.
-            val detectionModePref = findPreference<ListPreference>("detection_mode")
-            detectionModePref?.setOnPreferenceChangeListener { _, newValue ->
-                when (newValue as String) {
-                    "CONTOUR" -> {
-                        Settings.DetectionMode.current = Settings.DetectionMode.Mode.CONTOUR
-                        Settings.DetectionMode.enableYOLOinference = false
-                    }
-
-                    "YOLO" -> {
-                        Settings.DetectionMode.current = Settings.DetectionMode.Mode.YOLO
-                        Settings.DetectionMode.enableYOLOinference = true
-                    }
-
-                    else -> {
-                        Settings.DetectionMode.current = Settings.DetectionMode.Mode.CONTOUR
-                        Settings.DetectionMode.enableYOLOinference = false
-                    }
-                }
-                Toast.makeText(context, "Detection mode set to $newValue", Toast.LENGTH_SHORT)
-                    .show()
-                true
             }
 
             // Maximum bounding boxes preference.
@@ -125,57 +130,46 @@ class SettingsActivity : AppCompatActivity() {
                 true
             }
 
-            // RAW trace enable listener.
-            val rawTracePref = findPreference<SwitchPreference>("enable_raw_trace")
-            rawTracePref?.setOnPreferenceChangeListener { _, newValue ->
-                val enabled = newValue as Boolean
-                Settings.Trace.enableRAWtrace = enabled
-                Toast.makeText(
-                    context,
-                    "RAW Trace: ${if (enabled) "Yes" else "No"}",
-                    Toast.LENGTH_SHORT
-                ).show()
-                true
+            val traceTypesPref = findPreference<MultiSelectListPreference>(Settings.KEY_TRACE_TYPES)
+            traceTypesPref?.summary = traceTypeSummary(traceTypesPref.values)
+            traceTypesPref?.setOnPreferenceChangeListener { preference, newValue ->
+                @Suppress("UNCHECKED_CAST")
+                val values = newValue as? Set<String> ?: emptySet()
+                val types = values.mapNotNull { value ->
+                    runCatching { Settings.Trace.Type.valueOf(value) }.getOrNull()
+                }.toSet()
+                if (types.isEmpty()) {
+                    Toast.makeText(context, "Select at least one trace type.", Toast.LENGTH_SHORT).show()
+                    false
+                } else {
+                    Settings.Trace.updateCollectionTypes(types)
+                    preference.summary = traceTypeSummary(values)
+                    true
+                }
             }
 
-            // SPLINE trace enable listener.
-            val splineTracePref = findPreference<SwitchPreference>("enable_spline_trace")
-            splineTracePref?.setOnPreferenceChangeListener { _, newValue ->
-                val enabled = newValue as Boolean
-                Settings.Trace.enableSPLINEtrace = enabled
-                Toast.makeText(
-                    context,
-                    "SPLINE Trace: ${if (enabled) "Yes" else "No"}",
-                    Toast.LENGTH_SHORT
-                ).show()
-                true
-            }
+            findPreference<ListPreference>(Settings.KEY_INFERENCE_TRACE_TYPE)
+                ?.setOnPreferenceChangeListener { _, newValue ->
+                    val type = (newValue as? String)
+                        ?.let { value -> runCatching { Settings.Trace.Type.valueOf(value) }.getOrNull() }
+                        ?: Settings.Trace.Type.SPLINE_CV
+                    Settings.Trace.updateInferenceType(type)
+                    true
+                }
 
-            // Export Data: 28x28 IMG saving listener.
-            val frameImgPref = findPreference<SwitchPreference>("frame_img")
-            frameImgPref?.setOnPreferenceChangeListener { _, newValue ->
-                val enabled = newValue as Boolean
-                Settings.ExportData.frameIMG = enabled
-                Toast.makeText(
-                    context,
-                    "28x28 IMG Saving: ${if (enabled) "Yes" else "No"}",
-                    Toast.LENGTH_SHORT
-                ).show()
-                true
-            }
+            findPreference<SeekBarPreference>(Settings.KEY_TRACE_BOLDNESS)
+                ?.setOnPreferenceChangeListener { _, newValue ->
+                    Settings.Trace.updateBoldness(newValue as? Int ?: Settings.Trace.DEFAULT_BOLDNESS)
+                    true
+                }
 
-            // Export Data: Video saving listener.
-            val videoDataPref = findPreference<SwitchPreference>("video_data")
-            videoDataPref?.setOnPreferenceChangeListener { _, newValue ->
-                val enabled = newValue as Boolean
-                Settings.ExportData.enablePredictionLogging = enabled
-                Toast.makeText(
-                    context,
-                    "Video Saving: ${if (enabled) "Yes" else "No"}",
-                    Toast.LENGTH_SHORT
-                ).show()
-                true
-            }
+            findPreference<SeekBarPreference>(Settings.KEY_INFERENCE_LABEL_SIZE)
+                ?.setOnPreferenceChangeListener { _, newValue ->
+                    Settings.Inference.updateLabelSize(
+                        newValue as? Int ?: Settings.Inference.DEFAULT_LABEL_SIZE
+                    )
+                    true
+                }
 
             // Prediction Logging listener
             val predLoggingPref = findPreference<SwitchPreference>("enable_prediction_logging")
@@ -189,14 +183,30 @@ class SettingsActivity : AppCompatActivity() {
                 ).show()
                 true
             }
+
+            updateModeSpecificPreferences(Settings.OperatingMode.current)
+        }
+
+        private fun traceTypeSummary(values: Set<String>): String {
+            val names = Settings.Trace.Type.entries
+                .filter { it.name in values }
+                .map(Settings.Trace.Type::displayName)
+            return names.joinToString().ifBlank { "Select at least one trace type" }
+        }
+
+        private fun updateModeSpecificPreferences(mode: Settings.OperatingMode.Mode) {
+            val capabilities = Settings.capabilitiesFor(mode)
+            findPreference<MultiSelectListPreference>(Settings.KEY_TRACE_TYPES)?.isEnabled =
+                capabilities.traceCollectionSettingsEnabled
+            findPreference<ListPreference>(Settings.KEY_INFERENCE_TRACE_TYPE)?.isEnabled =
+                capabilities.inferenceTraceSettingsEnabled
+            findPreference<SeekBarPreference>(Settings.KEY_INFERENCE_LABEL_SIZE)?.isEnabled =
+                capabilities.inferenceSettingsEnabled
+            findPreference<ListPreference>("max_boxes")?.isEnabled =
+                capabilities.inferenceSettingsEnabled
+            findPreference<SwitchPreference>("enable_prediction_logging")?.isEnabled =
+                capabilities.inferenceSettingsEnabled
         }
     }
 
-    // Handle back press: return to previous activity and apply settings
-    override fun onBackPressed() {
-        super.onBackPressed()
-        // Save settings and return to the calling Activity.
-        setResult(RESULT_OK, Intent())
-        finish()
-    }
 }

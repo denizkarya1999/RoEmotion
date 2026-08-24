@@ -1,11 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    Updated activity_main.xml:
-    - A single RadioButton (radioToggle) on the left that toggles between "Digits" and "Letters".
-    - Settings and About buttons arranged horizontally (next to each other) on the right.
-    - All controls are centered horizontally.
--->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/preview_frame"
@@ -16,8 +10,12 @@
     <!-- Camera Preview using TextureView -->
     <TextureView
         android:id="@+id/viewFinder"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <!-- ImageView for displaying processed frames -->
 
@@ -27,8 +25,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:alpha="0.8"
+        android:importantForAccessibility="no"
         android:scaleType="centerCrop"
-        android:visibility="visible" />
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <LinearLayout
         android:id="@+id/title_container"
@@ -39,7 +42,10 @@
         android:background="@color/darkBlue"
         android:paddingTop="16dp"
         android:paddingBottom="16dp"
-        android:elevation="4dp">
+        android:elevation="4dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
 
         <!-- Icon (ImageButton) -->
         <ImageButton
@@ -50,36 +56,45 @@
             android:src="@drawable/xemotion_logo"
             android:scaleType="fitCenter"
             android:adjustViewBounds="true"
-            android:contentDescription="@string/switch_camera" />
+            android:contentDescription="@string/app_name" />
 
         <!-- Title Text -->
         <TextView
             android:id="@+id/titleText"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="RoEmotion"
+            android:layout_weight="1"
+            android:text="@string/app_name"
             android:textSize="44sp"
             android:textColor="@color/yellow"
             android:textStyle="bold"
             android:gravity="center"
-            android:paddingStart="8dp" />
+            android:maxLines="1"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:autoSizeTextType="uniform"
+            android:autoSizeMinTextSize="24sp"
+            android:autoSizeMaxTextSize="44sp"
+            android:autoSizeStepGranularity="2sp" />
     </LinearLayout>
 
     <!-- Top Controls Container: RadioButton on the left, and Settings/About buttons side-by-side on the right -->
-    <LinearLayout
+    <HorizontalScrollView
         android:id="@+id/top_controls_container"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center"
-        android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="90dp">
+        android:fillViewport="true"
+        android:scrollbars="none"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/title_container">
 
         <!-- Horizontal container for Settings and About Buttons -->
         <LinearLayout
             android:id="@+id/settings_about_container"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="center"
             android:orientation="horizontal"
             android:gravity="center">
 
@@ -121,17 +136,19 @@
                 android:textColor="@color/darkBlue"
                 android:elevation="2dp" />
         </LinearLayout>
-    </LinearLayout>
+    </HorizontalScrollView>
 
     <!-- Zoom Buttons Container (placed on the right side) -->
     <LinearLayout
         android:id="@+id/zoom_button_container"
         android:layout_width="75dp"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|center_vertical"
         android:layout_marginEnd="16dp"
         android:gravity="center"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
 
         <!-- Zoom In Button -->
         <Button
@@ -176,11 +193,31 @@
             android:layout_height="60dp"
             android:backgroundTint="@android:color/holo_blue_light"
             android:elevation="2dp"
-            android:text="Z"
+            android:text="I"
+            android:contentDescription="@string/local_inference"
             android:textColor="@android:color/white"
             android:textSize="24sp" />
 
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/countdownText"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#66000000"
+        android:clickable="false"
+        android:contentDescription="@string/start_countdown"
+        android:focusable="false"
+        android:gravity="center"
+        android:importantForAccessibility="yes"
+        android:textColor="@color/yellow"
+        android:textSize="120sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <!-- Bottom Controls -->
     <LinearLayout
@@ -189,17 +226,20 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:layout_gravity="center_horizontal|bottom"
-        android:layout_marginBottom="50dp">
+        android:layout_marginBottom="32dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
 
-        <!-- Start Tracking Button -->
+        <!-- Mode-specific action button -->
         <Button
             android:id="@+id/startProcessingButton"
             android:layout_width="110dp"
             android:layout_height="110dp"
             android:backgroundTint="@color/blue"
             android:elevation="2dp"
-            android:text="Start Tracking"
+            android:text="@string/start_processing"
+            android:textSize="14sp"
             android:textColor="@android:color/white"
             android:layout_marginEnd="16dp" />
 
@@ -208,11 +248,11 @@
             android:id="@+id/switchCameraButton"
             android:layout_width="110dp"
             android:layout_height="110dp"
-            android:text="Switch Camera"
+            android:text="@string/switch_camera"
             android:textColor="@color/darkBlue"
             android:textSize="16sp"
             android:backgroundTint="@color/yellow"
             android:elevation="2dp" />
     </LinearLayout>
 
-</FrameLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

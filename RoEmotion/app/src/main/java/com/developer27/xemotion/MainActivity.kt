@@ -2,31 +2,19 @@ package com.developer27.xemotion
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.ContentValues
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
-import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CaptureRequest
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
-import android.os.Environment
-import android.preference.PreferenceManager
-import android.provider.MediaStore
 import android.text.InputType
 import android.util.Log
-import android.util.SparseIntArray
-import android.view.Surface
 import android.view.TextureView
 import android.view.View
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -37,30 +25,18 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.preference.PreferenceManager
+import com.developer27.xemotion.ar.ArModeManager
 import com.developer27.xemotion.camera.CameraHelper
 import com.developer27.xemotion.databinding.ActivityMainBinding
+import com.developer27.xemotion.inference.EmotionInference
 import com.developer27.xemotion.inference.LocalInferenceActivity
-import com.developer27.xemotion.inference.PyTorchClassifier
-import com.developer27.xemotion.inference.PyTorchModuleLoader
+import com.developer27.xemotion.ui.applySystemBarMargins
+import com.developer27.xemotion.ui.applySystemBarPadding
+import com.developer27.xemotion.ui.enableRoEmotionEdgeToEdge
 import com.developer27.xemotion.videoprocessing.Settings
-import com.developer27.xemotion.videoprocessing.VideoDrawing.Traces.TracePreprocessing
 import com.developer27.xemotion.videoprocessing.VideoProcessor
-import org.opencv.core.Scalar
-import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.GpuDelegate
-import org.tensorflow.lite.nnapi.NnApiDelegate
-import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
-import java.io.IOException
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
-import java.text.SimpleDateFormat
-import java.util.ArrayDeque
-import java.util.Date
-import java.util.Locale
-import java.util.Timer
-import java.util.TimerTask
+import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
 
@@ -70,79 +46,50 @@ class MainActivity : AppCompatActivity() {
     // App preferences storage
     private lateinit var sharedPreferences: SharedPreferences
 
-    // Android camera system manager
-    private lateinit var cameraManager: CameraManager
-
     // Helper class for camera operations (open, close, settings)
     private lateinit var cameraHelper: CameraHelper
-
-    // TFLite YOLO interpreter for LED detection
-    private var yoloInterpreter: Interpreter? = null
 
     // Main video processing pipeline (detection + drawing + labels)
     private var videoProcessor: VideoProcessor? = null
 
-    // Trace export / preprocessing helper
-    private val tracePreprocessing = TracePreprocessing()
+    // Activity-facing inference coordinator
+    private lateinit var emotionInference: EmotionInference
 
-    // Sequence length used by the emotion model (number of frames)
-    private val seqLen = 5
-
-    // Buffers for contour/global sequence inference
-    private val traceBuffer = ArrayDeque<Bitmap>(seqLen)
-    private val contourTraceBuffer = ArrayDeque<Bitmap>(seqLen)
-
-    // Per-user sequence buffers for YOLO mode (one buffer per detected user)
-    private val perUserBuffers = Array(3) { ArrayDeque<Bitmap>(seqLen) }
-
-    // PyTorch-based emotion classifier
-    private lateinit var emotionClassifier: PyTorchClassifier
+    // AR Mode manager
+    private lateinit var arModeManager: ArModeManager
+    private var configuredOperatingMode: Settings.OperatingMode.Mode? = null
 
     // Flags for recording and processing states
     private var isRecording = false
     private var isProcessing = false
     private var isProcessingFrame = false // prevents overlapping frame processing
-
-    // AR mode state and timer
-    private var isArMode = false
-    private var arTimer: CountDownTimer? = null
-
-    // Timer for periodic export + inference
-    private var exportTimer: Timer? = null
-    private var batchCount = 0 // counts saved/exported batches
+    private var isStopping = false
+    private var isCountingDown = false
+    private var isActivityResumed = false
+    private var isPermissionRequestInFlight = false
+    private var collectionDialog: AlertDialog? = null
+    private var startCountdown: CountDownTimer? = null
+    private val afterStopActions = mutableListOf<() -> Unit>()
 
     // UI/control state flags
-    private var shouldClearPrediction = false
     private var isFrontCamera = false
-
-    // Cached contour prediction so UI keeps the last result visible
-    private var lastContourUserLabel: String = "CONTOUR"
-    private var lastContourClassificationLabel: String = ""
-    private var lastContourEmotionLabel: String = ""
-    private var lastContourConfidencePct: Float = 0f
-    private var lastContourColor: Scalar = Scalar(255.0, 255.0, 255.0)
+    private var displayedProcessedBitmap: Bitmap? = null
 
     // Required runtime permissions
-    private val requiredPermissions = arrayOf(
-        Manifest.permission.CAMERA,
-        Manifest.permission.RECORD_AUDIO
-    )
+    private val requiredPermissions = buildList {
+        add(Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }.toTypedArray()
 
     // Launcher for requesting camera + audio permissions at runtime
     private lateinit var requestPermissionLauncher: ActivityResultLauncher<Array<String>>
 
     companion object {
-        private const val SETTINGS_REQUEST_CODE = 1 // request code for settings activity
-
-        // Maps device rotation → camera preview orientation
-        private val ORIENTATIONS = SparseIntArray().apply {
-            append(Surface.ROTATION_0, 90)
-            append(Surface.ROTATION_90, 0)
-            append(Surface.ROTATION_180, 270)
-            append(Surface.ROTATION_270, 180)
-        }
-
         private const val TAG = "MainActivity" // log tag
+        private const val COUNTDOWN_DURATION_MILLIS = 3_000L
+        private const val MAX_PROCESSING_FRAME_EDGE = 1_280
     }
 
     // TextureView listener for camera preview lifecycle
@@ -150,21 +97,23 @@ class MainActivity : AppCompatActivity() {
         @SuppressLint("MissingPermission")
         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
             Log.d(TAG, "onSurfaceTextureAvailable: $width x $height")
-
-            // Open camera if permissions are granted, otherwise request them
+            if (!isActivityResumed) return
             if (allPermissionsGranted()) {
                 cameraHelper.openCamera()
             } else {
-                requestPermissionLauncher.launch(requiredPermissions)
+                requestRequiredPermissions()
             }
         }
 
-        // No special handling needed for size changes
-        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) =
-            Unit
+        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+            cameraHelper.configurePreviewTransform(width, height)
+        }
 
-        // Return false so system handles surface release
-        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = false
+        // Stop using the surface and let TextureView release its SurfaceTexture.
+        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+            cameraHelper.closeCamera()
+            return true
+        }
 
         override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
             // Process each new frame only when tracking is active
@@ -178,21 +127,27 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Keep screen awake while app is running
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         installSplashScreen()
 
         super.onCreate(savedInstanceState)
+        enableRoEmotionEdgeToEdge()
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
+        viewBinding.titleContainer.applySystemBarPadding(bottom = false)
+        viewBinding.topControlsContainer.applySystemBarPadding(top = false, bottom = false)
+        viewBinding.zoomButtonContainer.applySystemBarMargins(end = true)
+        viewBinding.buttonContainer.applySystemBarMargins(bottom = true)
 
         // Initialize core app components
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
-        cameraManager = getSystemService(CAMERA_SERVICE) as CameraManager
+        Settings.load(sharedPreferences)
         cameraHelper = CameraHelper(this, viewBinding, sharedPreferences)
-        videoProcessor = VideoProcessor(this)
+        videoProcessor = VideoProcessor()
+        emotionInference = EmotionInference(this, videoProcessor)
 
         // Hide processed preview until tracking starts
         viewBinding.processedFrameView.visibility = View.GONE
+        viewBinding.countdownText.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE
         viewBinding.viewFinder.surfaceTextureListener = textureListener
 
         // Open project website when title is tapped
@@ -202,53 +157,41 @@ class MainActivity : AppCompatActivity() {
 
         // Permission launcher for camera + audio
         requestPermissionLauncher =
-            registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
-                val camGranted = perms[Manifest.permission.CAMERA] ?: false
-                val micGranted = perms[Manifest.permission.RECORD_AUDIO] ?: false
-
-                // Open camera only if both permissions are granted
-                if (camGranted && micGranted) {
-                    if (viewBinding.viewFinder.isAvailable) {
+            registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+                isPermissionRequestInFlight = false
+                if (allPermissionsGranted()) {
+                    if (isActivityResumed && viewBinding.viewFinder.isAvailable) {
                         cameraHelper.openCamera()
                     }
                 } else {
                     Toast.makeText(
                         this,
-                        "Camera & Audio permissions are required.",
+                        "Camera and required storage permissions must be granted.",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
             }
 
-        // Request permissions or open camera immediately
-        if (allPermissionsGranted()) {
-            if (viewBinding.viewFinder.isAvailable) {
-                cameraHelper.openCamera()
+        if (!allPermissionsGranted()) requestRequiredPermissions()
+
+        arModeManager = ArModeManager(
+            this,
+            viewBinding,
+            cameraHelper,
+            { isRecording || isCountingDown },
+            { startProcessingAndRecording() },
+            {
+                stopProcessingAndRecording()
+                updateOperatingModeUi()
             }
-        } else {
-            requestPermissionLauncher.launch(requiredPermissions)
-        }
-
-        // Load PyTorch model once to verify the asset is accessible
-        val module = PyTorchModuleLoader.loadFromAssets(
-            this,
-            "RoEmotion_Emotion_Detection_ResNet_50_LSTM_Attention.pt"
         )
-        Log.d(TAG, "Emotion recognition model loaded successfully: $module")
+        applyOperatingModeConfiguration()
 
-        // Create emotion classifier from PyTorch asset
-        emotionClassifier = PyTorchClassifier.fromAsset(
-            this,
-            "RoEmotion_Emotion_Detection_ResNet_50_LSTM_Attention.pt"
-        )
-
-        // Load TFLite detector in the background
-        loadTFLiteModelOnStartupThreaded("RoEmotion_LED_Detection_float32.tflite")
         cameraHelper.setupZoomControls()
 
         // Start or stop tracking
         viewBinding.startProcessingButton.setOnClickListener {
-            if (isRecording) {
+            if (isRecording || isCountingDown) {
                 stopProcessingAndRecording()
             } else {
                 startProcessingAndRecording()
@@ -272,8 +215,11 @@ class MainActivity : AppCompatActivity() {
 
         // Clear current predictions
         viewBinding.clearPredictionButton.setOnClickListener {
-            if (isRecording) stopProcessingAndRecording()
-            clearAllPredictions()
+            if (isRecording || isStopping) {
+                stopProcessingAndRecording(emotionInference::clearAllPredictions)
+            } else {
+                emotionInference.clearAllPredictions()
+            }
         }
 
         // Open local inference page
@@ -283,611 +229,272 @@ class MainActivity : AppCompatActivity() {
 
         // Enter or exit AR mode
         viewBinding.arModeButton.setOnClickListener {
-            if (isArMode) exitArMode() else promptAndEnterArMode()
+            if (Settings.OperatingMode.current != Settings.OperatingMode.Mode.INFERENCE) return@setOnClickListener
+            if (!emotionInference.areModelsLoaded()) {
+                ensureInferenceModelsLoaded()
+                Toast.makeText(this, "Inference models are still loading.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (arModeManager.isArMode) arModeManager.exitArMode() else arModeManager.promptAndEnterArMode()
         }
     }
 
-    // Ask user how many minutes AR mode should run
-    private fun promptAndEnterArMode() {
-        val margin = (16 * resources.displayMetrics.density).toInt()
-
-        // Numeric input for AR session duration
-        val input = EditText(this).apply {
-            hint = "Minutes"
-            inputType = InputType.TYPE_CLASS_NUMBER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(margin, margin, margin, 0)
-            }
+    private fun applyOperatingModeConfiguration() {
+        Settings.load(sharedPreferences)
+        val mode = Settings.OperatingMode.current
+        if (configuredOperatingMode != mode && isCountingDown) cancelStartCountdown()
+        if (isStopping) {
+            updateOperatingModeUi()
+            return
         }
-
-        // Show duration dialog, then convert minutes -> milliseconds
-        AlertDialog.Builder(this)
-            .setTitle("AR Session Duration")
-            .setMessage("Enter how many minutes to run AR mode:")
-            .setView(input)
-            .setPositiveButton("Start") { _, _ ->
-                val minutes = input.text.toString().toLongOrNull()?.coerceAtLeast(1) ?: 1L
-                enterArMode(minutes * 60_000L)
+        if (configuredOperatingMode != mode) {
+            if (isRecording) {
+                stopProcessingAndRecording()
+                return
             }
-            .setNegativeButton("Cancel", null)
-            .setCancelable(true)
-            .show()
+            if (arModeManager.isArMode) arModeManager.exitArMode()
+            if (isStopping) return
+            when (mode) {
+                Settings.OperatingMode.Mode.DATA_COLLECTION -> emotionInference.unloadModels()
+                Settings.OperatingMode.Mode.INFERENCE -> ensureInferenceModelsLoaded()
+            }
+            configuredOperatingMode = mode
+        } else if (mode == Settings.OperatingMode.Mode.INFERENCE) {
+            ensureInferenceModelsLoaded()
+        }
+        updateOperatingModeUi()
     }
 
-    // Enter AR mode, hide system UI, and force AR rolling shutter settings
-    private fun enterArMode(durationMs: Long) {
-        isArMode = true
-        updateArButtonUi(true)
-        hideUiForAr(true)
-
-        // Hide system bars for immersive AR mode
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let { ic ->
-                ic.hide(WindowInsets.Type.systemBars())
-                ic.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    private fun ensureInferenceModelsLoaded() {
+        emotionInference.loadModels { result ->
+            result.onFailure { error ->
+                Log.e(TAG, "Inference model startup failed", error)
+                Toast.makeText(
+                    this,
+                    "Unable to load inference models: ${error.message}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
+        }
+    }
+
+    private fun updateOperatingModeUi() {
+        val capabilities = Settings.capabilitiesFor(Settings.OperatingMode.current)
+        val inferenceActionsEnabled = capabilities.inferenceActionsEnabled
+        val auxiliaryControlsEnabled = !isStopping && !isCountingDown
+        viewBinding.titleText.text = getString(R.string.app_name)
+        listOf(
+            viewBinding.arModeButton,
+            viewBinding.localInferenceButton,
+            viewBinding.clearPredictionButton
+        ).forEach { action ->
+            action.isEnabled = inferenceActionsEnabled && auxiliaryControlsEnabled
+            action.visibility = if (inferenceActionsEnabled) View.VISIBLE else View.GONE
+        }
+        listOf(
+            viewBinding.switchCameraButton,
+            viewBinding.settingsButton,
+            viewBinding.aboutButton,
+            viewBinding.zoomInButton,
+            viewBinding.zoomOutButton,
+            viewBinding.titleContainer
+        ).forEach { control -> control.isEnabled = auxiliaryControlsEnabled }
+        viewBinding.startProcessingButton.isEnabled = !isStopping
+        if (isRecording || isCountingDown) {
+            viewBinding.startProcessingButton.text = getString(R.string.stop_processing)
+            viewBinding.startProcessingButton.backgroundTintList =
+                ContextCompat.getColorStateList(this, R.color.red)
         } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility =
-                (View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_FULLSCREEN
-                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+            viewBinding.startProcessingButton.text = getString(R.string.start_processing)
+            viewBinding.startProcessingButton.backgroundTintList =
+                ContextCompat.getColorStateList(this, R.color.blue)
+        }
+    }
+
+    // Start camera-frame processing and the independent inference session
+    private fun startProcessingAndRecording() {
+        if (isStopping || isCountingDown) return
+        if (videoProcessor?.isOpenCvReady != true) {
+            Toast.makeText(this, R.string.opencv_initialization_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+        if (Settings.OperatingMode.current == Settings.OperatingMode.Mode.DATA_COLLECTION) {
+            promptForCollectionDetails()
+            return
+        }
+        if (!emotionInference.areModelsLoaded()) {
+            ensureInferenceModelsLoaded()
+            Toast.makeText(this, "Inference models are still loading.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        beginStartCountdown(collectionUserName = null, collectionEmotion = null)
+    }
+
+    private fun promptForCollectionDetails() {
+        if (collectionDialog?.isShowing == true) return
+        val userNameInput = EditText(this).apply {
+            hint = getString(R.string.collection_user_name_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            isSingleLine = true
+        }
+        val emotionInput = EditText(this).apply {
+            hint = getString(R.string.collection_emotion_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            isSingleLine = true
+        }
+        val horizontalPadding = (24 * resources.displayMetrics.density).toInt()
+        val inputContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(horizontalPadding, 0, horizontalPadding, 0)
+            addView(userNameInput)
+            addView(emotionInput)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.data_collection_title)
+            .setMessage(R.string.collection_details_question)
+            .setView(inputContainer)
+            .setPositiveButton(R.string.start_processing, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        collectionDialog = dialog
+        dialog.setOnDismissListener {
+            if (collectionDialog === dialog) collectionDialog = null
         }
 
-        // Start tracking automatically if not already running
-        if (!isRecording) startProcessingAndRecording()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val userName = userNameInput.text.toString().trim()
+                val emotion = emotionInput.text.toString().trim()
+                if (userName.isEmpty()) {
+                    userNameInput.error = getString(R.string.collection_user_name_required)
+                }
+                if (emotion.isEmpty()) {
+                    emotionInput.error = getString(R.string.collection_emotion_required)
+                }
+                if (userName.isNotEmpty() && emotion.isNotEmpty()) {
+                    dialog.dismiss()
+                    beginStartCountdown(userName, emotion)
+                }
+            }
+            userNameInput.requestFocus()
+        }
+        dialog.show()
+    }
 
-        // Force AR-specific rolling shutter camera settings
-        cameraHelper.forceArRollingShutter()
+    private fun beginStartCountdown(
+        collectionUserName: String?,
+        collectionEmotion: String?
+    ) {
+        if (isRecording || isStopping || isCountingDown) return
+        val requestedMode = Settings.OperatingMode.current
+        isCountingDown = true
+        viewBinding.countdownText.visibility = View.VISIBLE
+        updateOperatingModeUi()
 
-        // Restart AR countdown timer
-        arTimer?.cancel()
-        arTimer = object : CountDownTimer(durationMs, 1_000L) {
-            override fun onTick(millisUntilFinished: Long) = Unit
+        startCountdown = object : CountDownTimer(COUNTDOWN_DURATION_MILLIS, 1_000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                val value = ((millisUntilFinished + 999L) / 1_000L).coerceIn(1L, 3L)
+                val text = value.toString()
+                viewBinding.countdownText.text = text
+            }
 
             override fun onFinish() {
-                exitArMode()
+                startCountdown = null
+                isCountingDown = false
+                hideCountdownOverlay()
+                updateOperatingModeUi()
+                if (!isActivityResumed || Settings.OperatingMode.current != requestedMode) return
+                beginProcessingSession(collectionUserName, collectionEmotion)
             }
         }.start()
     }
 
-    // Exit AR mode and restore normal UI/camera behavior
-    private fun exitArMode() {
-        if (!isArMode) return
-
-        isArMode = false
-        arTimer?.cancel()
-        arTimer = null
-
-        updateArButtonUi(false)
-        hideUiForAr(false)
-
-        // Stop active processing/export loop
-        if (isRecording) {
-            isRecording = false
-            isProcessing = false
-            exportTimer?.cancel()
-            exportTimer = null
-        }
-
-        // Restore normal system UI
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(true)
-            window.insetsController?.show(WindowInsets.Type.systemBars())
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
-        }
-
-        // Restore normal camera shutter settings
-        cameraHelper.updateShutterSpeed()
-
-        // Reset processing UI
-        viewBinding.startProcessingButton.text = getString(R.string.start_capture)
-        viewBinding.startProcessingButton.backgroundTintList =
-            ContextCompat.getColorStateList(this, R.color.blue)
-        viewBinding.processedFrameView.visibility = View.GONE
-        viewBinding.processedFrameView.setImageBitmap(null)
+    private fun cancelStartCountdown() {
+        if (!isCountingDown && startCountdown == null) return
+        startCountdown?.cancel()
+        startCountdown = null
+        isCountingDown = false
+        hideCountdownOverlay()
+        updateOperatingModeUi()
     }
 
-    // Update AR button state
-    private fun updateArButtonUi(ar: Boolean) {
-        viewBinding.arModeButton.apply {
-            // Toggle AR button label and color
-            text = if (ar) "Exit AR" else "AR Mode"
-            backgroundTintList = ColorStateList.valueOf(
-                ContextCompat.getColor(this@MainActivity, if (ar) R.color.red else R.color.green)
-            )
-            setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.white))
+    private fun hideCountdownOverlay() {
+        viewBinding.countdownText.text = ""
+        viewBinding.countdownText.visibility = View.GONE
+    }
+
+    private fun beginProcessingSession(
+        collectionUserName: String?,
+        collectionEmotion: String?
+    ) {
+        if (isStopping) return
+        if (Settings.OperatingMode.current == Settings.OperatingMode.Mode.INFERENCE &&
+            !emotionInference.areModelsLoaded()
+        ) {
+            ensureInferenceModelsLoaded()
+            Toast.makeText(this, "Inference models are still loading.", Toast.LENGTH_SHORT).show()
+            return
         }
-    }
-
-    // Hide normal UI while AR mode is active
-    private fun hideUiForAr(hide: Boolean) {
-        // Hide non-AR controls, keep processed frame visible only when processing
-        viewBinding.titleContainer.visibility = if (hide) View.GONE else View.VISIBLE
-        viewBinding.topControlsContainer.visibility = if (hide) View.GONE else View.VISIBLE
-        viewBinding.zoomButtonContainer.visibility = if (hide) View.GONE else View.VISIBLE
-        viewBinding.buttonContainer.visibility = if (hide) View.GONE else View.VISIBLE
-        viewBinding.processedFrameView.visibility = if (isProcessing) View.VISIBLE else View.GONE
-    }
-
-    // Restore auto exposure if manual exposure was previously forced
-    private fun trySetAutoExposure() {
-        val builder = cameraHelper.captureRequestBuilder ?: return
-
-        // Switch camera back to automatic exposure mode
-        builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-
-        try {
-            cameraHelper.cameraCaptureSession?.setRepeatingRequest(
-                builder.build(),
-                null,
-                cameraHelper.backgroundHandler
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to revert AE: ${e.message}")
-        }
-    }
-
-    // Start frame processing, exporting, and timed inference ticks
-    private fun startProcessingAndRecording() {
         isRecording = true
         isProcessing = true
 
         // Update UI to tracking state
-        viewBinding.startProcessingButton.text = "Stop Tracking"
+        viewBinding.startProcessingButton.text = getString(R.string.stop_processing)
         viewBinding.startProcessingButton.backgroundTintList =
             ContextCompat.getColorStateList(this, R.color.red)
         viewBinding.processedFrameView.visibility = View.VISIBLE
 
-        // Reset counters, buffers, and processor state
-        batchCount = 0
-        clearAllBuffers()
-
-        videoProcessor?.reset()
-        clearAllPredictions()
-
-        // Use different periodic export intervals for contour vs YOLO
-        val intervalMs = when (Settings.DetectionMode.current) {
-            Settings.DetectionMode.Mode.CONTOUR -> 700L
-            Settings.DetectionMode.Mode.YOLO -> 800L
-        }
-
-        exportTimer?.cancel()
-        exportTimer = Timer()
-        exportTimer?.scheduleAtFixedRate(object : TimerTask() {
-            override fun run() {
-                runOnUiThread {
-                    val vp = videoProcessor ?: return@runOnUiThread
-
-                    // Export traces and run inference based on current detection mode
-                    when (Settings.DetectionMode.current) {
-                        Settings.DetectionMode.Mode.YOLO -> processYoloExportTick(vp)
-                        Settings.DetectionMode.Mode.CONTOUR -> processContourExportTick(vp)
-                    }
-
-                    appendPredictionToLog("log")
-
-                    // Reset per-tick processor state
-                    vp.reset()
-
-                    // Re-apply cached contour prediction after reset
-                    if (Settings.DetectionMode.current == Settings.DetectionMode.Mode.CONTOUR) {
-                        restoreContourPredictionState()
-                    }
-                }
-            }
-        }, intervalMs, intervalMs)
-    }
-
-    // Export per-user traces and run user-specific inference in YOLO mode
-    private fun processYoloExportTick(vp: VideoProcessor) {
-        val order = vp.getDetectionOrder()
-        if (order.isEmpty()) return
-
-        for (cid in order) {
-            if (cid !in perUserBuffers.indices) continue
-
-            // Save all trace variants for this detected user
-            tracePreprocessing.exportPerUserTraceVariantsSnapshot(
-                classId = cid,
-                perClassRaw = vp.getPerClassRaw()
-            )?.let { variants ->
-                savePerUserBitmap(variants.raw, cid, "raw")
-                savePerUserBitmap(variants.rawCv, cid, "rawCv")
-                savePerUserBitmap(variants.spline, cid, "spline")
-                savePerUserBitmap(variants.splineCv, cid, "splineCv")
-            }
-
-            // Export processed trace used for sequence inference
-            val userBmp = tracePreprocessing.exportProcessedTraceForClass(
-                classId = cid,
-                perClassRaw = vp.getPerClassRaw(),
-                perClassSmooth = vp.getPerClassSmooth()
-            ) ?: continue
-
-            val buf = perUserBuffers[cid]
-            buf.addLast(userBmp)
-            if (buf.size > seqLen) buf.removeFirst()
-
-            // Run inference once enough frames are collected
-            if (buf.size == seqLen) {
-                runPerUserInferenceAndLabel(cid, buf.toList())
-                buf.clear()
-            }
-        }
-    }
-
-    // Export contour trace and run contour-based inference
-    private fun processContourExportTick(vp: VideoProcessor) {
-        // Build processed contour trace from current smooth points
-        val contourBmp = tracePreprocessing.exportSplineTraceWithCvProcessing(
-            vp.getSmoothDataList()
-        )
-
-        // Optionally save exported contour image
-        if (Settings.ExportData.frameIMG) {
-            saveContourBitmap(contourBmp)
-        }
-
-        // Keep only the latest seqLen contour frames
-        contourTraceBuffer.addLast(contourBmp)
-        if (contourTraceBuffer.size > seqLen) {
-            contourTraceBuffer.removeFirst()
-        }
-
-        if (contourTraceBuffer.size == seqLen) {
-            // Run sequence inference when enough contour frames exist
-            runContourInferenceAndLabel(contourTraceBuffer.toList())
-            contourTraceBuffer.clear()
-        } else {
-            // Keep previous contour result visible until next inference is ready
-            restoreContourPredictionState()
-        }
+        emotionInference.startSession(collectionUserName, collectionEmotion)
     }
 
     // Stop processing and run last export/inference pass if needed
-    private fun stopProcessingAndRecording() {
-        if (!isRecording) return
+    private fun stopProcessingAndRecording(afterStopped: (() -> Unit)? = null) {
+        afterStopped?.let(afterStopActions::add)
+        if (isStopping) return
+        if (isCountingDown) {
+            cancelStartCountdown()
+            runAfterStopActions()
+            return
+        }
+        if (!isRecording) {
+            runAfterStopActions()
+            return
+        }
 
         isRecording = false
         isProcessing = false
+        isStopping = true
+        viewBinding.startProcessingButton.isEnabled = false
 
-        // Stop periodic export/inference timer
-        exportTimer?.cancel()
-        exportTimer = null
-
-        try {
-            val vp = videoProcessor
-            if (vp != null) {
-                when (Settings.DetectionMode.current) {
-                    Settings.DetectionMode.Mode.CONTOUR -> {
-                        // Final contour export + inference before stopping
-                        val traceBitmap = tracePreprocessing.exportSplineTraceWithCvProcessing(
-                            vp.getSmoothDataList()
-                        )
-                        saveBatchAndRunInference(traceBitmap)
-                        restoreContourPredictionState()
-                    }
-
-                    Settings.DetectionMode.Mode.YOLO -> {
-                        // Final per-user export + inference before stopping
-                        for (cid in vp.getDetectionOrder()) {
-                            if (cid !in perUserBuffers.indices) continue
-
-                            val userBmp = tracePreprocessing.exportProcessedTraceForClass(
-                                classId = cid,
-                                perClassRaw = vp.getPerClassRaw(),
-                                perClassSmooth = vp.getPerClassSmooth()
-                            ) ?: continue
-
-                            val buf = perUserBuffers[cid]
-                            buf.addLast(userBmp)
-
-                            while (buf.size > seqLen) {
-                                buf.removeFirst()
-                            }
-
-                            if (buf.size >= seqLen) {
-                                runPerUserInferenceAndLabel(cid, buf.toList())
-                                buf.clear()
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error exporting trace", e)
-        }
-
-        // Show export summary if image saving is enabled
-        if (Settings.ExportData.frameIMG) {
-            Toast.makeText(this, "$batchCount batches have been saved", Toast.LENGTH_LONG).show()
-        }
-
-        clearAllBuffers()
-
-        // Reset UI back to idle state
-        viewBinding.startProcessingButton.text = getString(R.string.start_capture)
         viewBinding.startProcessingButton.backgroundTintList =
             ContextCompat.getColorStateList(this, R.color.blue)
         viewBinding.processedFrameView.visibility = View.GONE
         viewBinding.processedFrameView.setImageBitmap(null)
+        displayedProcessedBitmap?.recycle()
+        displayedProcessedBitmap = null
+        updateOperatingModeUi()
 
-        videoProcessor?.classificationLabel = ""
-    }
-
-    // Run sequence classification for one detected user
-    private fun runPerUserInferenceAndLabel(classId: Int, frames: List<Bitmap>) {
-        // Classify the sequence of frames for this user
-        val (bestLabel, probs) = emotionClassifier.classifySequence(frames)
-        val bestIdx = probs.indices.maxByOrNull { probs[it] } ?: 0
-        val confidencePct = probs[bestIdx] * 100f
-
-        emotionClassifier.classifyAndLogSequence(frames) // optional detailed logging
-
-        // Resolve user label (fallback if processor not ready)
-        val userName = videoProcessor?.labelForClass(classId) ?: "User_${classId + 1}"
-
-        // Build display text: User | Emotion (Confidence)
-        val textResult = String.format(
-            Locale.US,
-            "%s | %s (%.2f%%)",
-            userName,
-            bestLabel,
-            confidencePct
-        )
-
-        // Select display color based on predicted emotion
-        val textColorScalar = colorForEmotion(bestLabel)
-
-        // Store prediction for drawing (box + label)
-        videoProcessor?.setPerUserEmotion(classId, bestLabel, textColorScalar, confidencePct)
-
-        // Update global labels shown on UI
-        videoProcessor?.userLabel = userName
-        videoProcessor?.classificationLabel = textResult
-    }
-
-    // Run sequence classification for contour mode
-    private fun runContourInferenceAndLabel(frames: List<Bitmap>) {
-        // Classify the current contour sequence
-        val (bestLabel, probs) = emotionClassifier.classifySequence(frames)
-        val bestIdx = probs.indices.maxByOrNull { probs[it] } ?: 0
-        val confidencePct = probs[bestIdx] * 100f
-
-        emotionClassifier.classifyAndLogSequence(frames) // optional detailed logging
-
-        val contourLabel = "CONTOUR"
-        val emotionText = String.format(
-            Locale.US,
-            "%s (%.2f%%)",
-            bestLabel,
-            confidencePct
-        )
-
-        // Pick display color based on predicted emotion
-        val textColorScalar = colorForEmotion(bestLabel)
-
-        // Cache contour prediction so it can be restored later
-        lastContourUserLabel = contourLabel
-        lastContourEmotionLabel = bestLabel
-        lastContourConfidencePct = confidencePct
-        lastContourClassificationLabel = emotionText
-        lastContourColor = textColorScalar
-
-        // Update current labels shown by the video processor
-        videoProcessor?.userLabel = contourLabel
-        videoProcessor?.classificationLabel = emotionText
-
-        try {
-            // Store contour emotion as user 0 for drawing logic
-            videoProcessor?.setPerUserEmotion(0, bestLabel, textColorScalar, confidencePct)
-        } catch (e: Exception) {
-            Log.w(TAG, "Contour per-user emotion update skipped: ${e.message}")
-        }
-    }
-
-    // Restore cached contour labels after processor resets
-    private fun restoreContourPredictionState() {
-        // Only restore labels in contour mode
-        if (Settings.DetectionMode.current != Settings.DetectionMode.Mode.CONTOUR) return
-
-        // Nothing to restore if no cached contour prediction exists
-        if (lastContourClassificationLabel.isBlank()) return
-
-        // Restore cached labels back into the video processor
-        videoProcessor?.userLabel = lastContourUserLabel
-        videoProcessor?.classificationLabel = lastContourClassificationLabel
-
-        try {
-            // Restore cached contour emotion/color/confidence for drawing
-            videoProcessor?.setPerUserEmotion(
-                0,
-                lastContourEmotionLabel,
-                lastContourColor,
-                lastContourConfidencePct
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Contour restore per-user emotion skipped: ${e.message}")
-        }
-    }
-
-    // Save final contour batch and run inference when stopping
-    private fun saveBatchAndRunInference(traceBitmap: Bitmap) {
-        // Skip saving/inference if export is disabled
-        if (!Settings.ExportData.frameIMG) return
-
-        batchCount++
-
-        // Keep only the latest seqLen contour frames
-        traceBuffer.addLast(traceBitmap)
-        if (traceBuffer.size > seqLen) {
-            traceBuffer.removeFirst()
-        }
-
-        // Wait until enough frames are collected for sequence inference
-        if (traceBuffer.size < seqLen) return
-
-        val frames = traceBuffer.toList()
-        val (bestLabel, probs) = emotionClassifier.classifySequence(frames)
-        emotionClassifier.classifyAndLogSequence(frames) // optional detailed logging
-
-        // Convert top probability to percentage
-        val confidencePct = (probs.maxOrNull() ?: 0f) * 100f
-        val contourLabel = "CONTOUR"
-        val emotionText = String.format(
-            Locale.US,
-            "%s (%.2f%%)",
-            bestLabel,
-            confidencePct
-        )
-
-        // Cache contour prediction so UI can keep showing it
-        lastContourUserLabel = contourLabel
-        lastContourEmotionLabel = bestLabel
-        lastContourConfidencePct = confidencePct
-        lastContourClassificationLabel = emotionText
-        lastContourColor = colorForEmotion(bestLabel)
-
-        // Push latest contour prediction into the video processor
-        videoProcessor?.userLabel = contourLabel
-        videoProcessor?.classificationLabel = emotionText
-
-        traceBuffer.clear() // reset sequence buffer after inference
-    }
-
-    // Save one per-user bitmap into a user-specific subfolder
-    private fun savePerUserBitmap(bmp: Bitmap, classId: Int, subfolder: String) {
-        if (!Settings.ExportData.frameIMG) return
-
-        @Suppress("DEPRECATION")
-        val picturesDir =
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-
-        val label = videoProcessor?.labelForClass(classId) ?: "User_${classId + 1}"
-        val baseDir = File(picturesDir, "Exported Lines from Xemotion/$label")
-        val dir = File(baseDir, subfolder).apply {
-            if (!exists()) mkdirs()
-        }
-
-        val filename = "Line_${label}_${batchCount + 1}.jpg"
-        val outFile = File(dir, filename)
-
-        try {
-            FileOutputStream(outFile).use { out ->
-                bmp.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                out.flush()
+        emotionInference.stopSession { savedTraceCount ->
+            isStopping = false
+            if (isDestroyed) return@stopSession
+            savedTraceCount?.let { count ->
+                Toast.makeText(
+                    this,
+                    resources.getQuantityString(R.plurals.saved_trace_count, count, count),
+                    Toast.LENGTH_LONG
+                ).show()
             }
-            Log.d(TAG, "Saved: ${outFile.absolutePath}")
-            batchCount++
-        } catch (e: IOException) {
-            Log.w(TAG, "Fallback to MediaStore", e)
-            saveViaMediaStore(bmp)
+            updateOperatingModeUi()
+            runAfterStopActions()
+            if (isActivityResumed) applyOperatingModeConfiguration()
         }
     }
 
-    // Save contour bitmap into the contour export folder
-    private fun saveContourBitmap(bmp: Bitmap) {
-        if (!Settings.ExportData.frameIMG) return
-
-        @Suppress("DEPRECATION")
-        val picturesDir =
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-
-        val baseDir = File(picturesDir, "Exported Lines from Xemotion/Contour")
-        if (!baseDir.exists()) baseDir.mkdirs()
-
-        val filename = "Line_Contour_${batchCount + 1}.jpg"
-        val outFile = File(baseDir, filename)
-
-        try {
-            FileOutputStream(outFile).use { out ->
-                bmp.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                out.flush()
-            }
-            Log.d(TAG, "Saved contour: ${outFile.absolutePath}")
-            batchCount++
-        } catch (e: IOException) {
-            Log.w(TAG, "Contour fallback to MediaStore", e)
-            saveViaMediaStore(bmp)
-        }
-    }
-
-    // Fallback image save path through MediaStore
-    private fun saveViaMediaStore(traceBitmap: Bitmap) {
-        // Determine filename based on current user label
-        val userName = videoProcessor?.userLabel?.takeIf { it.isNotBlank() } ?: "User_1"
-        val filename = "Line_${batchCount + 1}_$userName.jpg"
-
-        // Prepare metadata for MediaStore entry
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(
-                MediaStore.Images.Media.RELATIVE_PATH,
-                Environment.DIRECTORY_PICTURES + "/Exported Lines from Xemotion"
-            )
-            put(MediaStore.Images.Media.IS_PENDING, 1) // mark as writing in progress
-        }
-
-        val resolver = contentResolver
-        val uri = resolver.insert(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            values
-        ) ?: run {
-            Log.e(TAG, "MediaStore insert failed") // insert failed
-            return
-        }
-
-        try {
-            // Write bitmap data to MediaStore
-            resolver.openOutputStream(uri)?.use { out ->
-                traceBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-            }
-
-            // Mark file as complete
-            values.clear()
-            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-
-            batchCount++
-            Log.d(TAG, "Batch #$batchCount saved via MediaStore: $uri")
-        } catch (e: IOException) {
-            Log.e(TAG, "Fallback save via MediaStore failed", e) // write error
-        }
-    }
-
-    // Append latest prediction to a text log if enabled
-    private fun appendPredictionToLog(fullLabel: String) {
-        if (!Settings.ExportData.enablePredictionLogging) return
-
-        val label = videoProcessor?.classificationLabel ?: ""
-        val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-        val line = "$ts => $label"
-
-        @Suppress("DEPRECATION")
-        val docDir =
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        if (!docDir.exists()) docDir.mkdirs()
-
-        val logFile = File(docDir, "RoEmotion_Predictions_Log.txt")
-
-        try {
-            logFile.appendText("$line\n")
-        } catch (e: IOException) {
-            Log.e(TAG, "Error writing prediction log: ${e.message}")
-        }
+    private fun runAfterStopActions() {
+        if (afterStopActions.isEmpty()) return
+        val actions = afterStopActions.toList()
+        afterStopActions.clear()
+        actions.forEach { action -> action() }
     }
 
     // Process the current preview frame through VideoProcessor
@@ -895,165 +502,113 @@ class MainActivity : AppCompatActivity() {
         // Prevent overlapping frame processing
         if (isProcessingFrame) return
 
-        val bitmap = viewBinding.viewFinder.bitmap ?: return
+        val bitmap = captureProcessingFrame() ?: return
         isProcessingFrame = true
 
-        // Restore last contour prediction before processing the next contour frame
-        if (Settings.DetectionMode.current == Settings.DetectionMode.Mode.CONTOUR) {
-            restoreContourPredictionState()
-        }
-
         // Process current frame and update preview output
-        videoProcessor?.processFrame(bitmap) { processedFrames ->
+        videoProcessor?.processFrame(bitmap) { processedBitmap ->
             runOnUiThread {
-                processedFrames?.let { (outputBitmap, _) ->
-                    if (isProcessing) {
-                        viewBinding.processedFrameView.setImageBitmap(outputBitmap)
-                    }
+                if (processedBitmap != null && isProcessing) {
+                    displayedProcessedBitmap?.takeIf { it !== processedBitmap }?.recycle()
+                    displayedProcessedBitmap = processedBitmap
+                    viewBinding.processedFrameView.setImageBitmap(processedBitmap)
+                } else {
+                    processedBitmap?.recycle()
                 }
                 isProcessingFrame = false // unlock next frame
             }
         } ?: run {
+            bitmap.recycle()
             isProcessingFrame = false // reset if processor is null
         }
     }
 
-    // Load the detector model asynchronously and attach delegates if available
-    private fun loadTFLiteModelOnStartupThreaded(modelName: String) {
-        Thread {
-            // Copy model from assets → internal storage (background thread)
-            val bestLoadedPath = copyAssetModelBlocking(modelName)
+    /**
+     * TextureView.bitmap uses the full window dimensions, even when the camera buffer is much
+     * smaller. Capping the processing copy prevents high-resolution and large-screen devices from
+     * allocating multiple 15-30 MB bitmaps for every frame; the models receive no extra detail
+     * beyond the camera's 720p preview and YOLO's 640px input.
+     */
+    private fun captureProcessingFrame(): Bitmap? {
+        val preview = viewBinding.viewFinder
+        val width = preview.width
+        val height = preview.height
+        if (width <= 0 || height <= 0) return null
 
-            runOnUiThread {
-                // If loading failed, notify user and exit
-                if (bestLoadedPath.isEmpty()) {
-                    Toast.makeText(this, "Failed to load $modelName", Toast.LENGTH_SHORT).show()
-                    return@runOnUiThread
-                }
-
-                try {
-                    // Configure interpreter (use all available CPU cores)
-                    val options = Interpreter.Options().apply {
-                        setNumThreads(Runtime.getRuntime().availableProcessors())
-                    }
-
-                    var delegateAdded = false
-
-                    try {
-                        // Try NNAPI first (hardware acceleration on supported devices)
-                        val nnApiDelegate = NnApiDelegate()
-                        options.addDelegate(nnApiDelegate)
-                        delegateAdded = true
-                        Log.d(TAG, "NNAPI delegate added.")
-                    } catch (e: Exception) {
-                        Log.d(TAG, "NNAPI delegate unavailable, fallback to GPU", e)
-                    }
-
-                    if (!delegateAdded) {
-                        try {
-                            // Fallback to GPU delegate if NNAPI is not available
-                            val gpuDelegate = GpuDelegate()
-                            options.addDelegate(gpuDelegate)
-                            Log.d(TAG, "GPU delegate added.")
-                        } catch (e: Exception) {
-                            // Final fallback: CPU only
-                            Log.d(TAG, "GPU delegate unavailable, CPU only.", e)
-                        }
-                    }
-
-                    // Initialize YOLO interpreter and attach to video processor
-                    if (modelName == "RoEmotion_LED_Detection_float32.tflite") {
-                        yoloInterpreter = Interpreter(loadMappedFile(bestLoadedPath), options)
-                        yoloInterpreter?.let { videoProcessor?.setInterpreter(it) }
-                    }
-                } catch (e: Exception) {
-                    // Handle interpreter creation errors
-                    Toast.makeText(
-                        this,
-                        "Error loading TFLite model: ${e.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    Log.e(TAG, "TFLite Interpreter error", e)
-                }
-            }
-        }.start()
-    }
-
-    // Memory-map the copied model file for efficient reading
-    private fun loadMappedFile(modelPath: String): MappedByteBuffer {
-        FileInputStream(File(modelPath)).use { fis ->
-            val channel = fis.channel
-            return channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size())
-        }
-    }
-
-    // Copy model asset into app files directory if not already present
-    private fun copyAssetModelBlocking(assetName: String): String {
-        return try {
-            val outFile = File(filesDir, assetName)
-
-            // Reuse existing file if already copied and valid
-            if (outFile.exists() && outFile.length() > 0) {
-                outFile.absolutePath
-            } else {
-                // Copy model from assets → internal storage
-                assets.open(assetName).use { input ->
-                    FileOutputStream(outFile).use { output ->
-                        val buffer = ByteArray(4 * 1024) // chunked copy buffer
-                        var bytesRead: Int
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                        }
-                        output.flush() // ensure all bytes are written
-                    }
-                }
-                outFile.absolutePath
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error copying asset $assetName: ${e.message}") // log failure
-            ""
-        }
+        val scale = (MAX_PROCESSING_FRAME_EDGE.toFloat() / maxOf(width, height))
+            .coerceAtMost(1f)
+        val targetWidth = (width * scale).roundToInt().coerceAtLeast(1)
+        val targetHeight = (height * scale).roundToInt().coerceAtLeast(1)
+        return preview.getBitmap(targetWidth, targetHeight)
     }
 
     // Toggle between front and back camera
     private fun switchCamera() {
-        if (isRecording) stopProcessingAndRecording()
+        if (isRecording || isStopping) {
+            stopProcessingAndRecording(::switchCameraNow)
+            return
+        }
+        switchCameraNow()
+    }
 
+    @SuppressLint("MissingPermission")
+    private fun switchCameraNow() {
+        if (!allPermissionsGranted()) {
+            requestRequiredPermissions()
+            return
+        }
         isFrontCamera = !isFrontCamera
         cameraHelper.isFrontCamera = isFrontCamera
         cameraHelper.closeCamera()
-        cameraHelper.openCamera()
+        if (isActivityResumed) cameraHelper.openCamera()
     }
 
     // Take actions when you get back to the app
+    @SuppressLint("MissingPermission")
     override fun onResume() {
         super.onResume()
-
+        isActivityResumed = true
         cameraHelper.startBackgroundThread()
+        applyOperatingModeConfiguration()
 
-        if (viewBinding.viewFinder.isAvailable && allPermissionsGranted()) {
-            cameraHelper.openCamera()
+        if (viewBinding.viewFinder.isAvailable) {
+            if (allPermissionsGranted()) cameraHelper.openCamera() else requestRequiredPermissions()
         }
 
-        if (shouldClearPrediction) {
-            clearAllPredictions()
-            shouldClearPrediction = false
-        }
     }
 
     // Take actions when another app was opened
     override fun onPause() {
+        isActivityResumed = false
+        cancelStartCountdown()
+        if (arModeManager.isArMode) {
+            arModeManager.exitArMode()
+        }
         if (isRecording) {
             stopProcessingAndRecording()
         }
-
-        arTimer?.cancel()
-        arTimer = null
 
         cameraHelper.closeCamera()
         cameraHelper.stopBackgroundThread()
 
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        afterStopActions.clear()
+        startCountdown?.cancel()
+        startCountdown = null
+        isCountingDown = false
+        collectionDialog?.dismiss()
+        collectionDialog = null
+        viewBinding.processedFrameView.setImageBitmap(null)
+        displayedProcessedBitmap?.recycle()
+        displayedProcessedBitmap = null
+        emotionInference.close()
+        videoProcessor?.close()
+        videoProcessor = null
+        cameraHelper.release()
+        super.onDestroy()
     }
 
     // Check whether all required permissions are granted
@@ -1063,36 +618,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Clear all sequence buffers
-    private fun clearAllBuffers() {
-        traceBuffer.clear()
-        contourTraceBuffer.clear()
-        for (buf in perUserBuffers) {
-            buf.clear()
-        }
+    private fun requestRequiredPermissions() {
+        if (isPermissionRequestInFlight || allPermissionsGranted()) return
+        isPermissionRequestInFlight = true
+        requestPermissionLauncher.launch(requiredPermissions)
     }
 
-    // Clear active labels and cached contour labels
-    private fun clearAllPredictions() {
-        videoProcessor?.classificationLabel = ""
-        videoProcessor?.userLabel = ""
-
-        lastContourUserLabel = "CONTOUR"
-        lastContourClassificationLabel = ""
-        lastContourEmotionLabel = ""
-        lastContourConfidencePct = 0f
-        lastContourColor = Scalar(255.0, 255.0, 255.0)
-    }
-
-    // Map emotion labels to display colors
-    private fun colorForEmotion(label: String): Scalar {
-        return when {
-            label.contains("Angry", true) -> Scalar(255.0, 102.0, 102.0)
-            label.contains("Anxious", true) -> Scalar(255.0, 255.0, 153.0)
-            label.contains("Disgust", true) -> Scalar(153.0, 255.0, 153.0)
-            label.contains("Excited", true) -> Scalar(255.0, 204.0, 153.0)
-            label.contains("Sad", true) -> Scalar(153.0, 204.0, 255.0)
-            else -> Scalar(255.0, 255.0, 255.0)
-        }
-    }
 }

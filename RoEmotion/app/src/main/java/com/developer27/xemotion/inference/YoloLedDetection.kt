@@ -1,9 +1,8 @@
 package com.developer27.xemotion.inference
 
 import android.graphics.Bitmap
-import android.util.Log
 import com.developer27.xemotion.videoprocessing.Settings
-import com.developer27.xemotion.videoprocessing.VideoDrawing.BoundingBox
+import com.developer27.xemotion.videoprocessing.drawing.BoundingBox
 import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.core.Point
@@ -11,9 +10,6 @@ import org.opencv.core.Rect
 import org.opencv.core.Scalar
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.util.Locale
 import kotlin.collections.plusAssign
 import kotlin.math.exp
 import kotlin.math.max
@@ -45,17 +41,13 @@ data class LetterboxMeta(
     val targetHeight: Int
 )
 
-object YOLO_LED_Detection {
+object YoloLedDetection {
 
-    private const val TAG = "YOLO_LED_Detection"
     private const val EXPECTED_CLASSES = 3
 
     // Maps class indices to User_1, User_2, User_3
     private val classNumbers = IntArray(EXPECTED_CLASSES) { it + 1 }
     val userLabels = Array(EXPECTED_CLASSES) { idx -> "User_${classNumbers[idx]}" }
-
-    // Controls whether prediction logs are printed
-    private fun shouldLog(): Boolean = Settings.ExportData.enablePredictionLogging
 
     // Safe sigmoid with clamping for numerical stability
     private fun sigmoid(x: Float): Float {
@@ -76,24 +68,6 @@ object YOLO_LED_Detection {
     // Replaces invalid coordinates with 0
     private fun sanitizeCoord(x: Float): Float {
         return if (x.isFinite()) x else 0f
-    }
-
-    // Logs per-box class score information
-    private fun logClassScores(boxIdx: Int, classId: Int, score: Float) {
-        if (!shouldLog()) return
-
-        val scores = FloatArray(EXPECTED_CLASSES) { 0f }
-        if (classId in 0 until EXPECTED_CLASSES) {
-            scores[classId] = score
-        }
-
-        Log.d(
-            TAG,
-            "Box#$boxIdx -> " +
-                    "User_1=${"%.4f".format(Locale.US, scores[0])}, " +
-                    "User_2=${"%.4f".format(Locale.US, scores[1])}, " +
-                    "User_3=${"%.4f".format(Locale.US, scores[2])}"
-        )
     }
 
     // Creates a letterboxed bitmap and returns resize/padding metadata
@@ -154,33 +128,40 @@ object YOLO_LED_Detection {
     }
 
     // Converts bitmap to NHWC float tensor normalized to [0, 1]
-    fun bitmapToNormalizedTensorNHWC(bitmap: Bitmap): ByteBuffer {
+    fun bitmapToNormalizedTensorNHWC(bitmap: Bitmap): FloatArray {
         val width = bitmap.width
         val height = bitmap.height
-
-        val inputBuffer = ByteBuffer.allocateDirect(4 * width * height * 3)
-        inputBuffer.order(ByteOrder.nativeOrder())
-
+        val input = FloatArray(width * height * 3)
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
         var pixelIndex = 0
+        var inputIndex = 0
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val px = pixels[pixelIndex++]
-
-                val r = ((px shr 16) and 0xFF) / 255.0f
-                val g = ((px shr 8) and 0xFF) / 255.0f
-                val b = (px and 0xFF) / 255.0f
-
-                inputBuffer.putFloat(r)
-                inputBuffer.putFloat(g)
-                inputBuffer.putFloat(b)
+                input[inputIndex++] = ((px shr 16) and 0xFF) / 255.0f
+                input[inputIndex++] = ((px shr 8) and 0xFF) / 255.0f
+                input[inputIndex++] = (px and 0xFF) / 255.0f
             }
         }
+        return input
+    }
 
-        inputBuffer.rewind()
-        return inputBuffer
+    /** Converts LiteRT's flat output buffer into the model's [batch, boxes, values] layout. */
+    fun parseTFLite(rawOutput: FloatArray, shape: IntArray): List<YoloDet> {
+        require(shape.size == 3) { "Unsupported YOLO output shape: ${shape.contentToString()}" }
+        val expectedSize = shape.fold(1, Int::times)
+        require(rawOutput.size == expectedSize) {
+            "YOLO output has ${rawOutput.size} values; expected $expectedSize."
+        }
+        var index = 0
+        val structured = Array(shape[0]) {
+            Array(shape[1]) {
+                FloatArray(shape[2]) { rawOutput[index++] }
+            }
+        }
+        return parseTFLite(structured)
     }
 
     // Parses raw TFLite output into detections and applies per-class NMS
@@ -210,8 +191,6 @@ object YOLO_LED_Detection {
 
             val rawClass = det[5]
             val classId = if (rawClass.isFinite()) rawClass.toInt() else -1
-
-            logClassScores(i, classId, score)
 
             val w = x2 - x1
             val h = y2 - y1

@@ -1,6 +1,20 @@
 <resources>
     <string name="app_name">RoEmotion</string>
-    <string name="start_capture">Start Tracking</string>
-    <string name="stop_capture">Stop Tracking</string>
+    <string name="opencv_initialization_failed">Computer-vision processing could not start. Please restart RoEmotion.</string>
+    <string name="start_processing">Start</string>
+    <string name="stop_processing">Stop</string>
+    <string name="start_countdown">Starting countdown</string>
+    <string name="data_collection_title">Data Collection</string>
+    <string name="collection_details_question">Who and what emotion are you collecting data for?</string>
+    <string name="collection_user_name_hint">User name</string>
+    <string name="collection_emotion_hint">Emotion type</string>
+    <string name="collection_user_name_required">Enter a user name</string>
+    <string name="collection_emotion_required">Enter an emotion type</string>
+    <plurals name="saved_trace_count">
+        <item quantity="one">%d trace file saved</item>
+        <item quantity="other">%d trace files saved</item>
+    </plurals>
     <string name="switch_camera">Switch Camera</string>
+    <string name="local_inference">Dataset inference</string>
+    <string name="university_logo_description">University of Michigan-Dearborn logo</string>
 </resources>

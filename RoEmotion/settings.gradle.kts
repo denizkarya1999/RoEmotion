@@ -21,4 +21,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "RoEmotion"
 include(":app")
-include(":OpenCV-4.10.0")

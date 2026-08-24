@@ -2,147 +2,89 @@
 
 package com.developer27.xemotion.videoprocessing
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
-import com.developer27.xemotion.videoprocessing.CONTOUR.ContourVideoProcessing
-import com.developer27.xemotion.videoprocessing.VideoDrawing.BoundingBox
-import com.developer27.xemotion.videoprocessing.VideoDrawing.Traces.TracePatterns.KalmanBank
-import com.developer27.xemotion.videoprocessing.VideoDrawing.VideoDrawingHelper
-import com.developer27.xemotion.videoprocessing.YOLO.YOLOProcessing
+import org.opencv.android.OpenCVLoader
+import com.developer27.xemotion.inference.YoloModelSession
+import com.developer27.xemotion.videoprocessing.contour.ContourVideoProcessing
+import com.developer27.xemotion.videoprocessing.drawing.BoundingBox
+import com.developer27.xemotion.videoprocessing.drawing.VideoDrawingHelper
+import com.developer27.xemotion.videoprocessing.drawing.traces.patterns.KalmanBank
+import com.developer27.xemotion.videoprocessing.yolo.YoloProcessing
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.core.Point
 import org.opencv.core.Scalar
-import org.tensorflow.lite.Interpreter
-import java.util.LinkedList
-
-// --------------------------------------------------
-// Globals
-// --------------------------------------------------
-private var tfliteInterpreter: Interpreter? = null
-val rawDataList = LinkedList<Point>()
-val smoothDataList = LinkedList<Point>()
-
-// --- Per-class traces (0=User_1, 1=User_2, 2=User_3) ---
-val perClassRaw = Array(3) { LinkedList<Point>() }
-val perClassSmooth = Array(3) { LinkedList<Point>() }
-
-// Keep most-recent per-frame detection order (unique classIds 0..2)
-private val lastDetectionOrder = LinkedList<Int>()
 
 // Convenience: label map
 private val USER_LABELS = arrayOf("User_1", "User_2", "User_3")
 
-// Latest emotion & color per user (0..2)
-private val perUserEmotion = Array(3) { "" }
-private val perUserColor = Array(3) { Scalar(255.0, 255.0, 255.0) } // BGR
-private val perUserConfidence = FloatArray(3) { Float.NaN } // percent 0..100
-
-// --------------------------------------------------
-// Settings
-// --------------------------------------------------
-object Settings {
-
-    // Types of detections
-    object DetectionMode {
-        enum class Mode {
-            CONTOUR,
-            YOLO
-        }
-        var current: Mode = Mode.YOLO
-        var enableYOLOinference = true
-    }
-
-    // Inference parameters
-    object Inference {
-        var confidenceThreshold: Float = 0.001f
-        var iouThreshold: Float = 0.45f
-    }
-
-    // Trace settings
-    object Trace {
-        var enableRAWtrace = false
-        var enableSPLINEtrace = true
-        var splineStep = 0.01
-
-        // Colors and thickness
-        var originalLineColor = Scalar(173.0, 216.0, 230.0) // Light Blue
-        var splineLineColor = Scalar(255.0, 203.0, 5.0)     // Maize
-        var lineThickness = 100
-    }
-
-    object BoundingBox {
-        // Enable bounding box or not
-        var enableBoundingBox = true
-
-        // used for contour bounding boxes:
-        var boxColor = Scalar(255.0, 255.0, 255.0)
-        var boxThickness = 10
-
-        // max boxes per frame (1–3)
-        var maxPerFrame: Int = 3
-
-        // how to color the rectangle
-        enum class ColorMode { BY_USER, BY_EMOTION }
-
-        // color mode
-        var colorMode: ColorMode = ColorMode.BY_USER
-    }
-
-    object Brightness {
-        // Threshold and factor for brightness
-        var factor = 2.0
-        var threshold = 150.0
-    }
-
-    object ExportData {
-        // Save the image or not
-        var frameIMG = false
-
-        // Do logging or not
-        var enablePredictionLogging = false
-    }
-
-    object RollingShutter {
-        // Set or update this from SettingsActivity
-        var speedHz = 15f
-    }
-}
-
 // --------------------------------------------------
 // VideoProcessor
 // --------------------------------------------------
-class VideoProcessor(private val context: Context) {
+class VideoProcessor {
+    private val state = VideoProcessingState(USER_LABELS.size)
+    private val traceStateLock = Any()
+    private val processingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var yoloModel: YoloModelSession? = null
+
+    val isOpenCvReady: Boolean
 
     // Current user label (used in contour mode)
+    @Volatile
     var userLabel: String = "Contour"
 
     // Classification label (optional overlay text)
+    @Volatile
     var classificationLabel: String = ""
-
-    // Return latest detection order (thread-safe)
-    fun getDetectionOrder(): List<Int> = synchronized(lastDetectionOrder) {
-        lastDetectionOrder.toList()
-    }
 
     // Map classId (0..2) to user label string
     fun labelForClass(classId: Int): String =
         USER_LABELS[classId.coerceIn(0, 2)]
 
-    // Get raw trace points per class
-    fun getPerClassRaw(): Array<LinkedList<Point>> = perClassRaw
+    /** Atomically removes the YOLO traces accumulated since the previous inference tick. */
+    fun drainDetectedTraceBatch(): Map<Int, List<Point>> = synchronized(traceStateLock) {
+        state.detectionOrderSnapshot()
+            .associateWith(state::drainPerUserTrace)
+            .filterValues { points -> points.isNotEmpty() }
+            .also { state.clearTraces() }
+    }
 
-    // Get smoothed trace points per class
-    fun getPerClassSmooth(): Array<LinkedList<Point>> = perClassSmooth
+    /**
+     * Atomically removes contour traces only when all selected collection types can be rendered.
+     * Keeping a partial trace prevents slow movement from being discarded on a timer tick.
+     */
+    fun drainReadyContourTraceBatch(
+        types: Set<Settings.Trace.Type>
+    ): Pair<List<Point>, List<Point>>? = synchronized(traceStateLock) {
+        if (types.isEmpty()) return@synchronized null
+        val raw = state.rawTraceSnapshot()
+        val smooth = state.smoothTraceSnapshot()
+        val ready = types.all { type ->
+            val points = when (type) {
+                Settings.Trace.Type.RAW,
+                Settings.Trace.Type.RAW_CV -> raw
+                Settings.Trace.Type.SPLINE,
+                Settings.Trace.Type.SPLINE_CV -> smooth
+            }
+            points.size >= type.minimumPoints
+        }
+        if (!ready) return@synchronized null
+        state.clearTraces()
+        raw to smooth
+    }
 
-    // Get global smoothed trace (all users)
-    fun getSmoothDataList(): List<Point> = smoothDataList
-
-    // Get global raw trace (all users)
-    fun getRawDataList(): List<Point> = rawDataList
+    /** Removes any remaining contour points, allowing valid partial final exports on Stop. */
+    fun drainContourTraceBatch(): Pair<List<Point>, List<Point>> = synchronized(traceStateLock) {
+        val batch = state.rawTraceSnapshot() to state.smoothTraceSnapshot()
+        state.clearTraces()
+        batch
+    }
 
     // Set emotion, color, and confidence for a user
     fun setPerUserEmotion(
@@ -151,20 +93,17 @@ class VideoProcessor(private val context: Context) {
         colorBGR: Scalar? = null,
         confidencePct: Float? = null
     ) {
-        val id = classId.coerceIn(0, 2)
-        perUserEmotion[id] = emotion
-        perUserColor[id] = colorBGR ?: Scalar(255.0, 255.0, 255.0)
-        confidencePct?.let { perUserConfidence[id] = it }
+        state.setEmotion(classId, emotion, colorBGR, confidencePct)
     }
 
     // YOLO processing pipeline (lazy initialization)
     private val yoloProcessing by lazy {
-        YOLOProcessing(
+        YoloProcessing(
             drawUserBoxAndLabel = { mat, box: BoundingBox, classId ->
                 drawingHelper.drawUserBoxAndLabel(mat, box, classId)
             },
-            perClassRaw = perClassRaw,
-            lastDetectionOrder = lastDetectionOrder
+            recordTracePoint = state::appendPerUserTrace,
+            updateDetectionOrder = state::recordDetections
         )
     }
 
@@ -174,118 +113,157 @@ class VideoProcessor(private val context: Context) {
             drawTopLabel = { mat, box: BoundingBox, text, color ->
                 drawingHelper.drawTopLabel(mat, box, text, color)
             },
-            rawDataList = rawDataList,
-            smoothDataList = smoothDataList
+            rawDataList = state.rawTrace,
+            smoothDataList = state.smoothTrace
         )
     }
 
     // Helper for drawing bounding boxes, labels, etc.
     private val drawingHelper by lazy {
-        VideoDrawingHelper(
-            perUserEmotion = perUserEmotion,
-            perUserColor = perUserColor,
-            perUserConfidence = perUserConfidence
-        )
+        VideoDrawingHelper(state::emotionDisplaySnapshot)
     }
 
     // Initialize OpenCV and Kalman filter
     init {
-        initOpenCV()
+        isOpenCvReady = initOpenCV()
         KalmanBank.initKalmanFilter()
     }
 
-    // Load OpenCV native library
-    private fun initOpenCV() {
-        try {
-            System.loadLibrary("opencv_java4")
-        } catch (e: UnsatisfiedLinkError) {
-            Log.d("VideoProcessor", "OpenCV failed to load: ${e.message}", e)
+    // Load the bundled OpenCV runtime using its version-aware loader.
+    private fun initOpenCV(): Boolean = runCatching { OpenCVLoader.initLocal() }
+        .onFailure { error -> Log.e(TAG, "OpenCV failed to load", error) }
+        .getOrDefault(false)
+        .also { loaded ->
+            if (!loaded) Log.e(TAG, "OpenCV reported an unsuccessful load")
         }
+
+    // Attach the loaded LiteRT compiled model.
+    fun setYoloModel(model: YoloModelSession) {
+        val previous = synchronized(this) {
+            val old = yoloModel
+            yoloModel = model
+            old
+        }
+        previous?.let(::closeYoloModelSafely)
+
+        Log.d(
+            "VideoProcessor",
+            "LiteRT model attached with ${model.accelerator}; " +
+                "input=${model.inputShape.contentToString()} output=${model.outputShape.contentToString()}"
+        )
     }
 
-    // Set and initialize TFLite interpreter
-    fun setInterpreter(model: Interpreter) {
-
-        // Thread-safe assignment of interpreter
-        synchronized(this) {
-            tfliteInterpreter = model
+    fun clearYoloModel() {
+        val previous = synchronized(this) {
+            val old = yoloModel
+            yoloModel = null
+            old
         }
-
-        val interpreter = tfliteInterpreter
-
-        // Debug: log input tensor information
-        val inputCount = interpreter?.inputTensorCount ?: 0
-        for (i in 0 until inputCount) {
-            val t = interpreter?.getInputTensor(i)
-            Log.d(
-                "TFLITE_DEBUG",
-                "input[$i] shape=${t?.shape()?.joinToString()} dtype=${t?.dataType()}"
-            )
-        }
-
-        // Debug: log output tensor information
-        val outputCount = interpreter?.outputTensorCount ?: 0
-        for (i in 0 until outputCount) {
-            val t = interpreter?.getOutputTensor(i)
-            Log.d(
-                "TFLITE_DEBUG",
-                "output[$i] shape=${t?.shape()?.joinToString()} dtype=${t?.dataType()}"
-            )
-        }
-
-        // Confirm interpreter setup
-        Log.d("VideoProcessor", "TFLite Model set in VideoProcessor successfully!")
+        previous?.let(::closeYoloModelSafely)
     }
 
     // Main async frame processing entry point
     fun processFrame(
         bitmap: Bitmap,
-        callback: (Pair<Bitmap, Bitmap>?) -> Unit
+        callback: (Bitmap?) -> Unit
     ) {
+        if (!isOpenCvReady) {
+            Log.e(TAG, "Frame processing skipped because OpenCV is unavailable")
+            if (!bitmap.isRecycled) bitmap.recycle()
+            callback(null)
+            return
+        }
+
         // Debug: log current rolling shutter configuration
         Log.d("VideoProcessor", "Current Rolling Shutter Speed = ${Settings.RollingShutter.speedHz} Hz")
 
         // Run processing on background thread
-        CoroutineScope(Dispatchers.Default).launch {
-            val result: Pair<Bitmap, Bitmap>? = try {
-
-                // Select detection pipeline (Contour vs YOLO)
-                when (Settings.DetectionMode.current) {
+        processingScope.launch {
+            var result: Bitmap? = null
+            var delivered = false
+            try {
+                result = when (Settings.DetectionMode.current) {
                     Settings.DetectionMode.Mode.CONTOUR -> processFrameInternalCONTOUR(bitmap)
                     Settings.DetectionMode.Mode.YOLO -> processFrameInternalYOLO(bitmap)
                 }
-
+                withContext(Dispatchers.Main) {
+                    delivered = true
+                    callback(result)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: LinkageError) {
+                Log.e(TAG, "Native frame processing failed", error)
+                withContext(Dispatchers.Main) {
+                    delivered = true
+                    callback(null)
+                }
             } catch (e: Exception) {
-                // Handle processing errors safely
-                Log.e("VideoProcessor", "Error processing frame: ${e.message}", e)
-                null
-            }
-
-            // Return result to UI thread
-            withContext(Dispatchers.Main) {
-                callback(result)
+                Log.e(TAG, "Error processing frame: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    delivered = true
+                    callback(null)
+                }
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+                if (!delivered) result?.takeUnless(Bitmap::isRecycled)?.recycle()
             }
         }
     }
 
     // YOLO-based detection (runs on IO thread)
-    private suspend fun processFrameInternalYOLO(bitmap: Bitmap): Pair<Bitmap, Bitmap> =
+    private suspend fun processFrameInternalYOLO(bitmap: Bitmap): Bitmap =
         withContext(Dispatchers.IO) {
-            yoloProcessing.processFrame(bitmap, tfliteInterpreter)
+            synchronized(traceStateLock) {
+                synchronized(this@VideoProcessor) {
+                    val model = yoloModel
+                    if (model == null) {
+                        yoloProcessing.processFrame(bitmap, null)
+                    } else {
+                        synchronized(model) {
+                            yoloProcessing.processFrame(bitmap, model)
+                        }
+                    }
+                }
+            }
         }
 
     // Contour-based detection (no ML)
-    private fun processFrameInternalCONTOUR(bitmap: Bitmap): Pair<Bitmap, Bitmap>? {
-        return contourVideoProcessing.processFrame(
-            bitmap = bitmap,
-            userLabel = userLabel,
-            classificationLabel = classificationLabel
-        )
+    private fun processFrameInternalCONTOUR(bitmap: Bitmap): Bitmap {
+        return synchronized(traceStateLock) {
+            contourVideoProcessing.processFrame(
+                bitmap = bitmap,
+                userLabel = userLabel,
+                classificationLabel = classificationLabel
+            )
+        }
     }
 
     // Clear all stored trace data
     fun reset() {
-        rawDataList.clear()
-        smoothDataList.clear()
+        synchronized(traceStateLock) { state.clearTraces() }
+    }
+
+    fun clearEmotionState() {
+        state.clearEmotions()
+    }
+
+    fun close() {
+        processingScope.cancel()
+        val model = synchronized(this) {
+            val current = yoloModel
+            yoloModel = null
+            current
+        }
+        model?.let(::closeYoloModelSafely)
+    }
+
+    private fun closeYoloModelSafely(model: YoloModelSession) {
+        runCatching { synchronized(model) { model.close() } }
+            .onFailure { error -> Log.e(TAG, "Unable to close YOLO model", error) }
+    }
+
+    private companion object {
+        const val TAG = "VideoProcessor"
     }
 }

@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen
-    xmlns:android="http://schemas.android.com/apk/res/android">
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory
+        android:title="Operating Mode"
+        android:layout="@layout/preference_category_layout">
+
+        <ListPreference
+            android:key="operating_mode"
+            android:layout="@layout/preference_list_layout"
+            android:title="App Mode"
+            android:summary="%s"
+            android:entries="@array/operating_mode_options"
+            android:entryValues="@array/operating_mode_values"
+            android:defaultValue="INFERENCE" />
+    </PreferenceCategory>
+
     <PreferenceCategory
         android:title="Camera Settings"
         android:layout="@layout/preference_category_layout">
@@ -19,9 +34,9 @@
         <SwitchPreference
             android:key="manual_iso_enabled"
             android:layout="@layout/preference_list_layout"
-            android:title="Manual ISO"
+            android:title="Custom ISO"
             android:summaryOn="Use the ISO value below"
-            android:summaryOff="Let the camera choose ISO"
+            android:summaryOff="Use the camera range midpoint"
             android:defaultValue="true" />
 
         <!-- User-entered ISO -->
@@ -39,21 +54,11 @@
         android:title="Detection Settings"
         android:layout="@layout/preference_category_layout">
 
-        <!-- Detection Mode Preference -->
-        <ListPreference
-            android:key="detection_mode"
-            android:layout="@layout/preference_list_layout"
-            android:title="Detection Mode"
-            android:summary="Choose between Contour and YOLO detection"
-            android:entries="@array/detection_mode_options"
-            android:entryValues="@array/detection_mode_values"
-            android:defaultValue="CONTOUR" />
-
         <!-- Bounding Box Enable Preference -->
         <SwitchPreference
             android:key="enable_bounding_box"
             android:layout="@layout/preference_list_layout"
-            android:title="Enable Emotion Labeling"
+            android:title="Show Bounding Box and Label"
             android:summaryOn="Yes"
             android:summaryOff="No"
             android:defaultValue="true" />
@@ -69,39 +74,65 @@
     </PreferenceCategory>
 
     <PreferenceCategory
-        android:title="Tracing Settings"
+        android:title="Trace Collection"
         android:layout="@layout/preference_category_layout">
 
-        <!-- Enable RAW Trace -->
-        <SwitchPreference
-            android:key="enable_raw_trace"
+        <MultiSelectListPreference
+            android:key="trace_types"
             android:layout="@layout/preference_list_layout"
-            android:title="Enable RAW Trace"
-            android:summaryOn="Yes"
-            android:summaryOff="No"
-            android:defaultValue="false" />
-
-        <!-- Enable SPLINE Trace -->
-        <SwitchPreference
-            android:key="enable_spline_trace"
-            android:layout="@layout/preference_list_layout"
-            android:title="Enable SPLINE Trace"
-            android:summaryOn="Yes"
-            android:summaryOff="No"
-            android:defaultValue="true" />
+            android:title="Trace Types"
+            android:dialogTitle="Select trace types to collect"
+            android:entries="@array/trace_type_options"
+            android:entryValues="@array/trace_type_values"
+            android:defaultValue="@array/default_trace_type_values" />
     </PreferenceCategory>
 
     <PreferenceCategory
-        android:title="Export Data"
+        android:title="Inference Trace"
         android:layout="@layout/preference_category_layout">
 
-        <SwitchPreference
-            android:key="frame_img"
+        <ListPreference
+            android:key="inference_trace_type"
             android:layout="@layout/preference_list_layout"
-            android:title="Save 28x28 IMG"
-            android:summaryOn="Yes"
-            android:summaryOff="No"
-            android:defaultValue="false" />
+            android:title="Inference Trace Type"
+            android:summary="%s"
+            android:entries="@array/trace_type_options"
+            android:entryValues="@array/trace_type_values"
+            android:defaultValue="SPLINE_CV" />
+
+        <SeekBarPreference
+            android:key="inference_label_size"
+            android:layout="@layout/preference_seekbar_layout"
+            android:title="Inference Label Size"
+            android:summary="8 = smallest, 20 = largest"
+            android:defaultValue="16"
+            android:max="20"
+            app:min="8"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="Trace Appearance"
+        android:layout="@layout/preference_category_layout">
+
+        <SeekBarPreference
+            android:key="trace_boldness"
+            android:layout="@layout/preference_seekbar_layout"
+            android:title="Trace Boldness"
+            android:summary="1 = thinnest, 20 = boldest"
+            android:defaultValue="10"
+            android:max="20"
+            app:min="1"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="Inference Logging"
+        android:layout="@layout/preference_category_layout">
 
         <!-- New: Prediction Logging -->
         <SwitchPreference

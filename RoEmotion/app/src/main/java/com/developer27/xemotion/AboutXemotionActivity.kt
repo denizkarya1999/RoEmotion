@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import com.developer27.xemotion.databinding.ActivityAboutXemotionBinding
+import com.developer27.xemotion.ui.applySystemBarPadding
+import com.developer27.xemotion.ui.enableRoEmotionEdgeToEdge
 
 class AboutXemotionActivity : AppCompatActivity() {
 
@@ -12,8 +14,10 @@ class AboutXemotionActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableRoEmotionEdgeToEdge()
         binding = ActivityAboutXemotionBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.root.applySystemBarPadding()
 
         // When the title container is clicked, open the URL in a browser.
         binding.titleContainer.setOnClickListener {

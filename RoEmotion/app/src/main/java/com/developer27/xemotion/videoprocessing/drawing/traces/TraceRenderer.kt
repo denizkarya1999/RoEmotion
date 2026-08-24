@@ -1,8 +1,8 @@
-package com.developer27.xemotion.videoprocessing.VideoDrawing.Traces
+package com.developer27.xemotion.videoprocessing.drawing.traces
 
 import com.developer27.xemotion.videoprocessing.Settings
-import com.developer27.xemotion.videoprocessing.VideoDrawing.BoundingBox
-import com.developer27.xemotion.videoprocessing.VideoDrawing.Traces.TracePatterns.KalmanBank
+import com.developer27.xemotion.videoprocessing.drawing.BoundingBox
+import com.developer27.xemotion.videoprocessing.drawing.traces.patterns.KalmanBank
 import org.apache.commons.math3.analysis.interpolation.SplineInterpolator
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction
 import org.opencv.core.Mat
@@ -21,41 +21,56 @@ object TraceRenderer {
         rawDataList: MutableList<Point>,
         smoothDataList: MutableList<Point>
     ) {
-        center?.let { detectedCenter ->
-            rawDataList.add(detectedCenter)
-            val (fx, fy) = KalmanBank.applyKalmanFilter(detectedCenter)
-            smoothDataList.add(Point(fx, fy))
+        val (rawSnapshot, smoothSnapshot) = synchronized(rawDataList) {
+            center?.let { detectedCenter ->
+                rawDataList.add(detectedCenter)
+                val (fx, fy) = KalmanBank.applyKalmanFilter(detectedCenter)
+                smoothDataList.add(Point(fx, fy))
+            }
+            rawDataList.toList() to smoothDataList.toList()
         }
 
         with(Settings.Trace) {
             if (enableRAWtrace) {
-                drawRawTrace(rawDataList, contourMat)
+                drawRawTrace(rawSnapshot, contourMat)
             }
             if (enableSPLINEtrace) {
-                drawSplineCurve(smoothDataList, contourMat)
+                drawSplineCurve(smoothSnapshot, contourMat)
             }
         }
     }
 
-    fun drawRawTrace(data: List<Point>, image: Mat) {
+    fun drawRawTrace(
+        data: List<Point>,
+        image: Mat,
+        color: Scalar = Settings.Trace.originalLineColor,
+        thickness: Int = Settings.Trace.lineThickness
+    ) {
         for (i in 1 until data.size) {
             Imgproc.line(
                 image,
                 data[i - 1],
                 data[i],
-                Settings.Trace.originalLineColor,
-                Settings.Trace.lineThickness
+                color,
+                thickness
             )
         }
     }
 
-    fun drawSplineCurve(data: List<Point>, image: Mat) {
+    fun drawSplineCurve(
+        data: List<Point>,
+        image: Mat,
+        color: Scalar = Settings.Trace.splineLineColor,
+        thickness: Int = Settings.Trace.lineThickness,
+        step: Double = Settings.Trace.splineStep
+    ) {
         if (data.size < 3) return
 
         val (splineX, splineY) = applySplineInterpolation(data)
         var prevPoint: Point? = null
         var t = 0.0
         val maxT = (data.size - 1).toDouble()
+        val renderStep = boundedSplineStep(step, maxT)
 
         while (t <= maxT) {
             val currentPoint = Point(splineX.value(t), splineY.value(t))
@@ -64,12 +79,12 @@ object TraceRenderer {
                     image,
                     it,
                     currentPoint,
-                    Settings.Trace.splineLineColor,
-                    Settings.Trace.lineThickness
+                    color,
+                    thickness
                 )
             }
             prevPoint = currentPoint
-            t += Settings.Trace.splineStep
+            t += renderStep
         }
     }
 
@@ -119,13 +134,14 @@ object TraceRenderer {
         var prev: Point? = null
         var t = 0.0
         val maxT = (data.size - 1).toDouble()
+        val renderStep = boundedSplineStep(step, maxT)
         while (t <= maxT) {
             val pt = Point(sx.value(t) - offsetX, sy.value(t) - offsetY)
             prev?.let {
                 Imgproc.line(image, it, pt, color, thickness)
             }
             prev = pt
-            t += step
+            t += renderStep
         }
     }
 
@@ -133,11 +149,15 @@ object TraceRenderer {
         mat: Mat,
         box: BoundingBox,
         path: List<Point>,
-        color: Scalar = Settings.Trace.splineLineColor,  // use spline color
+        type: Settings.Trace.Type = Settings.Trace.inferenceType,
+        color: Scalar = when (type) {
+            Settings.Trace.Type.RAW,
+            Settings.Trace.Type.RAW_CV -> Settings.Trace.originalLineColor
+            Settings.Trace.Type.SPLINE,
+            Settings.Trace.Type.SPLINE_CV -> Settings.Trace.splineLineColor
+        },
         thickness: Int = Settings.Trace.lineThickness
     ) {
-        // If no writing is enabled, do nothing.
-        if (!(Settings.Trace.enableRAWtrace || Settings.Trace.enableSPLINEtrace)) return
         if (path.size < 2) return
 
         // Clamp box (for gating only)
@@ -162,30 +182,36 @@ object TraceRenderer {
         }
         if (dedup.size < 2) return
 
-        val medianFiltered = dedup.mapIndexed { i, _ ->
-            val s = max(0, i - 1);
-            val e = min(dedup.size, i + 2)
-            val win = dedup.subList(s, e)
-            val xs = win.map { it.x }.sorted();
-            val ys = win.map { it.y }.sorted()
-            Point(xs[xs.size / 2], ys[ys.size / 2])
-        }
-        val noisy = run {
-            val rng = Random()
-            val sigma = 2.0
-            medianFiltered.map { p ->
+        val applyCvProcessing = type == Settings.Trace.Type.RAW_CV ||
+            type == Settings.Trace.Type.SPLINE_CV
+        val processed = if (applyCvProcessing) {
+            val medianFiltered = dedup.mapIndexed { index, _ ->
+                val start = max(0, index - 1)
+                val end = min(dedup.size, index + 2)
+                val window = dedup.subList(start, end)
+                val xCoordinates = window.map { it.x }.sorted()
+                val yCoordinates = window.map { it.y }.sorted()
                 Point(
-                    p.x + rng.nextGaussian() * sigma,
-                    p.y + rng.nextGaussian() * sigma
+                    xCoordinates[xCoordinates.size / 2],
+                    yCoordinates[yCoordinates.size / 2]
                 )
             }
+            val random = Random()
+            medianFiltered.map { point ->
+                Point(
+                    point.x + random.nextGaussian() * 2.0,
+                    point.y + random.nextGaussian() * 2.0
+                )
+            }
+        } else {
+            dedup
         }
 
         // Keep only segments near the expanded box (but draw them on the full frame)
-        val filtered = ArrayList<Point>(noisy.size)
-        for (i in 1 until noisy.size) {
-            val p0 = noisy[i - 1];
-            val p1 = noisy[i]
+        val filtered = ArrayList<Point>(processed.size)
+        for (i in 1 until processed.size) {
+            val p0 = processed[i - 1]
+            val p1 = processed[i]
             if (nearBox(p0) || nearBox(p1)) {
                 if (filtered.isEmpty()) filtered.add(p0)
                 filtered.add(p1)
@@ -193,7 +219,14 @@ object TraceRenderer {
         }
         if (filtered.size < 2) return
 
-        // --- Draw as a spline curve on the full image ---
+        val useSpline = type == Settings.Trace.Type.SPLINE ||
+            type == Settings.Trace.Type.SPLINE_CV
+        if (!useSpline) {
+            drawRawTrace(filtered, mat, color, thickness)
+            return
+        }
+
+        // Draw the filtered path as a spline curve on the full image.
         if (filtered.size < 3) {
             // fallback: draw raw polyline if too few points for a spline
             for (i in 1 until filtered.size) {
@@ -206,8 +239,8 @@ object TraceRenderer {
         val (sx, sy) = applySplineInterpolation(filtered)
         var prev: Point? = null
         var t = 0.0
-        val step = Settings.Trace.splineStep
         val tMax = (filtered.size - 1).toDouble()
+        val step = boundedSplineStep(Settings.Trace.splineStep, tMax)
         while (t <= tMax) {
             val cur = Point(sx.value(t), sy.value(t))
             prev?.let { Imgproc.line(mat, it, cur, color, thickness) }
@@ -215,4 +248,12 @@ object TraceRenderer {
             t += step
         }
     }
+
+    private fun boundedSplineStep(requestedStep: Double, maxT: Double): Double {
+        val safeRequested = requestedStep.takeIf { it.isFinite() && it > 0.0 } ?: DEFAULT_SPLINE_STEP
+        return max(safeRequested, maxT / MAX_SPLINE_SEGMENTS)
+    }
+
+    private const val DEFAULT_SPLINE_STEP = 0.1
+    private const val MAX_SPLINE_SEGMENTS = 1_000.0
 }

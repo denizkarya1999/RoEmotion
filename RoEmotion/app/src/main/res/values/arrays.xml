@@ -1,5 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string-array name="operating_mode_options">
+        <item>Data Collection Mode</item>
+        <item>Inference Mode</item>
+    </string-array>
+
+    <string-array name="operating_mode_values">
+        <item>DATA_COLLECTION</item>
+        <item>INFERENCE</item>
+    </string-array>
+
+    <string-array name="trace_type_options">
+        <item>Raw</item>
+        <item>Raw + CV Processing</item>
+        <item>Kalman-Filter</item>
+        <item>Kalman Filter + CV Processing</item>
+    </string-array>
+
+    <string-array name="trace_type_values">
+        <item>RAW</item>
+        <item>RAW_CV</item>
+        <item>SPLINE</item>
+        <item>SPLINE_CV</item>
+    </string-array>
+
+    <string-array name="default_trace_type_values">
+        <item>SPLINE_CV</item>
+    </string-array>
+
     <string-array name="shutter_speed_options">
         <item>5 Hz</item>
         <item>10 Hz</item>
@@ -42,15 +70,6 @@
         <item>4000</item>
         <item>5000</item>
         <item>6000</item>
-    </string-array>
-
-    <string-array name="detection_mode_options">
-        <item>CONTOUR</item>
-        <item>YOLO</item>
-    </string-array>
-    <string-array name="detection_mode_values">
-        <item>CONTOUR</item>
-        <item>YOLO</item>
     </string-array>
 
     <string-array name="max_boxes_entries">
