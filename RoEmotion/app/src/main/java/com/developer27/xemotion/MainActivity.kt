@@ -88,7 +88,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity" // log tag
-        private const val COUNTDOWN_DURATION_MILLIS = 5_000L
+        private const val COUNTDOWN_DURATION_SECONDS = 5L
+        private const val COUNTDOWN_DURATION_MILLIS = COUNTDOWN_DURATION_SECONDS * 1_000L
         private const val MAX_PROCESSING_FRAME_EDGE = 1_280
     }
 
@@ -388,12 +389,14 @@ class MainActivity : AppCompatActivity() {
         if (isRecording || isStopping || isCountingDown) return
         val requestedMode = Settings.OperatingMode.current
         isCountingDown = true
+        viewBinding.countdownText.text = COUNTDOWN_DURATION_SECONDS.toString()
         viewBinding.countdownText.visibility = View.VISIBLE
         updateOperatingModeUi()
 
         startCountdown = object : CountDownTimer(COUNTDOWN_DURATION_MILLIS, 1_000L) {
             override fun onTick(millisUntilFinished: Long) {
-                val value = ((millisUntilFinished + 999L) / 1_000L).coerceIn(1L, 3L)
+                val value = ((millisUntilFinished + 999L) / 1_000L)
+                    .coerceIn(1L, COUNTDOWN_DURATION_SECONDS)
                 val text = value.toString()
                 viewBinding.countdownText.text = text
             }
