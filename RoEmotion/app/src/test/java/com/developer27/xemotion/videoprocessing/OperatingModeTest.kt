@@ -12,8 +12,8 @@ class OperatingModeTest {
     @After
     fun restoreDefaultMode() {
         Settings.applyOperatingMode(Settings.OperatingMode.Mode.INFERENCE)
-        Settings.Trace.updateCollectionTypes(setOf(Settings.Trace.Type.SPLINE_CV))
-        Settings.Trace.updateInferenceType(Settings.Trace.Type.SPLINE_CV)
+        Settings.Trace.updateCollectionTypes(Settings.Trace.DEFAULT_COLLECTION_TYPES)
+        Settings.Trace.updateInferenceType(Settings.Trace.DEFAULT_TYPE)
         Settings.Trace.updateBoldness(Settings.Trace.DEFAULT_BOLDNESS)
         Settings.Inference.updateLabelSize(Settings.Inference.DEFAULT_LABEL_SIZE)
     }
@@ -26,6 +26,14 @@ class OperatingModeTest {
         assertEquals(Settings.DetectionMode.Mode.CONTOUR, Settings.DetectionMode.current)
         assertFalse(Settings.DetectionMode.enableYOLOinference)
         assertTrue(Settings.ExportData.frameIMG)
+    }
+
+    @Test
+    fun collectionDefaultsMatchTheExperimentProfile() {
+        assertEquals(setOf(Settings.Trace.Type.RAW), Settings.Trace.DEFAULT_COLLECTION_TYPES)
+        assertEquals(Settings.Trace.Type.RAW, Settings.Trace.DEFAULT_TYPE)
+        assertEquals(5, Settings.Trace.DEFAULT_BOLDNESS)
+        assertEquals(6000f, Settings.RollingShutter.DEFAULT_SPEED_HZ)
     }
 
     @Test

@@ -25,7 +25,7 @@
     </string-array>
 
     <string-array name="default_trace_type_values">
-        <item>SPLINE_CV</item>
+        <item>RAW</item>
     </string-array>
 
     <string-array name="shutter_speed_options">

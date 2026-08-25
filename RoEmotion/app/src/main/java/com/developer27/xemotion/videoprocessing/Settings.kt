@@ -68,20 +68,23 @@ object Settings {
             SPLINE_CV("Kalman Filter + CV Processing", 3)
         }
 
+        val DEFAULT_TYPE = Type.RAW
+        val DEFAULT_COLLECTION_TYPES: Set<Type> = setOf(DEFAULT_TYPE)
+
         @Volatile
-        var enableRAWtrace = false
+        var enableRAWtrace = true
             private set
 
         @Volatile
-        var enableSPLINEtrace = true
+        var enableSPLINEtrace = false
             private set
 
         @Volatile
-        var collectionTypes: Set<Type> = setOf(Type.SPLINE_CV)
+        var collectionTypes: Set<Type> = DEFAULT_COLLECTION_TYPES
             private set
 
         @Volatile
-        var inferenceType: Type = Type.SPLINE_CV
+        var inferenceType: Type = DEFAULT_TYPE
             private set
 
         @Volatile
@@ -106,7 +109,7 @@ object Settings {
 
         const val MIN_BOLDNESS = 1
         const val MAX_BOLDNESS = 20
-        const val DEFAULT_BOLDNESS = 10
+        const val DEFAULT_BOLDNESS = 5
         private const val OVERLAY_THICKNESS_MULTIPLIER = 10
 
         fun updateCollectionTypes(types: Set<Type>) {
@@ -157,7 +160,9 @@ object Settings {
 
     object RollingShutter {
         @Volatile
-        var speedHz = 60f
+        var speedHz = DEFAULT_SPEED_HZ
+
+        const val DEFAULT_SPEED_HZ = 6000f
     }
 
     /** Applies the fixed pipeline contract for the selected top-level mode. */
@@ -194,12 +199,12 @@ object Settings {
             ?.mapNotNull { value -> runCatching { Trace.Type.valueOf(value) }.getOrNull() }
             ?.toSet()
             ?.takeIf { it.isNotEmpty() }
-            ?: setOf(Trace.Type.SPLINE_CV)
+            ?: Trace.DEFAULT_COLLECTION_TYPES
         Trace.updateCollectionTypes(traceTypes)
         Trace.updateInferenceType(
-            preferences.getString(KEY_INFERENCE_TRACE_TYPE, Trace.Type.SPLINE_CV.name)
+            preferences.getString(KEY_INFERENCE_TRACE_TYPE, Trace.DEFAULT_TYPE.name)
                 ?.let { value -> runCatching { Trace.Type.valueOf(value) }.getOrNull() }
-                ?: Trace.Type.SPLINE_CV
+                ?: Trace.DEFAULT_TYPE
         )
         Trace.updateBoldness(
             preferences.getInt(KEY_TRACE_BOLDNESS, Trace.DEFAULT_BOLDNESS)
@@ -213,9 +218,12 @@ object Settings {
             ?.coerceIn(1, 3)
             ?: 3
         ExportData.enablePredictionLogging = preferences.getBoolean(KEY_PREDICTION_LOGGING, false)
-        RollingShutter.speedHz = preferences.getString(KEY_SHUTTER_SPEED, "60")
+        RollingShutter.speedHz = preferences.getString(
+            KEY_SHUTTER_SPEED,
+            RollingShutter.DEFAULT_SPEED_HZ.toInt().toString()
+        )
             ?.toFloatOrNull()
-            ?: 60f
+            ?: RollingShutter.DEFAULT_SPEED_HZ
 
         val mode = runCatching {
             OperatingMode.Mode.valueOf(

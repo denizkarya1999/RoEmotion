@@ -28,7 +28,7 @@
             android:summary="Select the rolling shutter speed (in Hz)"
             android:entries="@array/shutter_speed_options"
             android:entryValues="@array/shutter_speed_values"
-            android:defaultValue="60" />
+            android:defaultValue="6000" />
 
         <!-- Optional: Explicitly toggle manual ISO usage -->
         <SwitchPreference
@@ -45,7 +45,7 @@
             android:layout="@layout/preference_list_layout"
             android:title="ISO"
             android:summary="Enter ISO (e.g., 100–6400)"
-            android:defaultValue="800"
+            android:defaultValue="400"
             android:dialogTitle="Set ISO"
             android:inputType="number" />
     </PreferenceCategory>
@@ -98,7 +98,7 @@
             android:summary="%s"
             android:entries="@array/trace_type_options"
             android:entryValues="@array/trace_type_values"
-            android:defaultValue="SPLINE_CV" />
+            android:defaultValue="RAW" />
 
         <SeekBarPreference
             android:key="inference_label_size"
@@ -122,7 +122,7 @@
             android:layout="@layout/preference_seekbar_layout"
             android:title="Trace Boldness"
             android:summary="1 = thinnest, 20 = boldest"
-            android:defaultValue="10"
+            android:defaultValue="5"
             android:max="20"
             app:min="1"
             app:seekBarIncrement="1"

@@ -64,7 +64,8 @@ class SettingsActivity : AppCompatActivity() {
             // Rolling Shutter Speed listener.
             val shutterSpeedPref = findPreference<ListPreference>("shutter_speed")
             shutterSpeedPref?.setOnPreferenceChangeListener { _, newValue ->
-                Settings.RollingShutter.speedHz = newValue.toString().toFloatOrNull() ?: 60f
+                Settings.RollingShutter.speedHz = newValue.toString().toFloatOrNull()
+                    ?: Settings.RollingShutter.DEFAULT_SPEED_HZ
                 // For example, update your global shutter speed setting here.
                 Toast.makeText(
                     context,
@@ -152,7 +153,7 @@ class SettingsActivity : AppCompatActivity() {
                 ?.setOnPreferenceChangeListener { _, newValue ->
                     val type = (newValue as? String)
                         ?.let { value -> runCatching { Settings.Trace.Type.valueOf(value) }.getOrNull() }
-                        ?: Settings.Trace.Type.SPLINE_CV
+                        ?: Settings.Trace.DEFAULT_TYPE
                     Settings.Trace.updateInferenceType(type)
                     true
                 }

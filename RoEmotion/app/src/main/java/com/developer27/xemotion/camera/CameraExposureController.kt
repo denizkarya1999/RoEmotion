@@ -21,7 +21,10 @@ class CameraExposureController(
             return
         }
 
-        val shutterFrequency = preferences.getString(KEY_SHUTTER_SPEED, "60")
+        val shutterFrequency = preferences.getString(
+            KEY_SHUTTER_SPEED,
+            DEFAULT_SHUTTER_FREQUENCY.toString()
+        )
             ?.toIntOrNull()
             ?: DEFAULT_SHUTTER_FREQUENCY
         val requestedExposure = shutterFrequency
@@ -112,8 +115,8 @@ class CameraExposureController(
 
     private companion object {
         const val NANOS_PER_SECOND = 1_000_000_000L
-        const val DEFAULT_SHUTTER_FREQUENCY = 60
-        const val DEFAULT_ISO = 800
+        const val DEFAULT_SHUTTER_FREQUENCY = 6000
+        const val DEFAULT_ISO = 400
         const val AR_SHUTTER_FREQUENCY = 6000
         const val AR_ISO = 100
         const val KEY_SHUTTER_SPEED = "shutter_speed"
