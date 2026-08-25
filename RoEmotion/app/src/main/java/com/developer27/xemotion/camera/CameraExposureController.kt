@@ -5,6 +5,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.TonemapCurve
 import kotlin.math.max
 
 /** Applies exposure, lighting, and flash preferences to a capture request. */
@@ -49,6 +50,7 @@ class CameraExposureController(
 
         setManualExposure(
             builder,
+            characteristics,
             requestedExposure.coerceIn(exposureRange.lower, exposureRange.upper),
             iso
         )
@@ -66,7 +68,7 @@ class CameraExposureController(
         val exposure = (NANOS_PER_SECOND / AR_SHUTTER_FREQUENCY)
             .coerceIn(exposureRange.lower, exposureRange.upper)
         val iso = max(isoRange.lower, AR_ISO).coerceAtMost(isoRange.upper)
-        setManualExposure(builder, exposure, iso)
+        setManualExposure(builder, characteristics, exposure, iso)
         return true
     }
 
@@ -106,11 +108,40 @@ class CameraExposureController(
         builder.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
     }
 
-    private fun setManualExposure(builder: CaptureRequest.Builder, exposureNanos: Long, iso: Int) {
+    private fun setManualExposure(
+        builder: CaptureRequest.Builder,
+        characteristics: CameraCharacteristics,
+        exposureNanos: Long,
+        iso: Int
+    ) {
         builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_OFF)
         builder.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
         builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNanos)
         builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+        applyNeutralPostProcessing(builder, characteristics)
+    }
+
+    /**
+     * Processed preview streams may otherwise apply device-specific digital gain and shadow-lifting
+     * tone curves. A neutral manual pipeline keeps the same exposure visibly comparable across
+     * Pixel generations and prevents dark surroundings from being raised around bright LEDs.
+     */
+    private fun applyNeutralPostProcessing(
+        builder: CaptureRequest.Builder,
+        characteristics: CameraCharacteristics
+    ) {
+        characteristics.get(CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE)
+            ?.lower
+            ?.let { minimumBoost ->
+                builder.set(CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST, minimumBoost)
+            }
+
+        val availableToneMapModes =
+            characteristics.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+        if (availableToneMapModes?.contains(CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE) == true) {
+            builder.set(CaptureRequest.TONEMAP_MODE, CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE)
+            builder.set(CaptureRequest.TONEMAP_CURVE, LINEAR_TONE_MAP)
+        }
     }
 
     private companion object {
@@ -127,5 +158,10 @@ class CameraExposureController(
         const val NORMAL_LIGHTING = "normal"
         const val LOW_LIGHTING = "low_light"
         const val HIGH_LIGHTING = "high_light"
+        val LINEAR_TONE_MAP = TonemapCurve(
+            floatArrayOf(0f, 0f, 1f, 1f),
+            floatArrayOf(0f, 0f, 1f, 1f),
+            floatArrayOf(0f, 0f, 1f, 1f)
+        )
     }
 }
