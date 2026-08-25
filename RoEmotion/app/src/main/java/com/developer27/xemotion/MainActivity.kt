@@ -88,7 +88,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity" // log tag
-        private const val COUNTDOWN_DURATION_MILLIS = 3_000L
+        private const val COUNTDOWN_DURATION_MILLIS = 5_000L
         private const val MAX_PROCESSING_FRAME_EDGE = 1_280
     }
 

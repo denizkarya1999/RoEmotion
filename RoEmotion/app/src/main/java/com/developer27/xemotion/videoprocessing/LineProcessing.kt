@@ -26,6 +26,15 @@ internal fun collectionDirectory(
 ): String = "$COLLECTED_DATA_ROOT/${sanitizeCollectionPathSegment(userName)}/" +
     "${sanitizeCollectionPathSegment(emotionType)}/${traceType.displayName}"
 
+internal fun traceFileName(
+    capturedAt: Date,
+    traceType: Settings.Trace.Type,
+    userName: String
+): String {
+    val timestamp = SimpleDateFormat("yyyy_MM_dd_HH_mm_ss_SSS", Locale.US).format(capturedAt)
+    return "${timestamp}_${traceType.name}_${sanitizeCollectionPathSegment(userName)}.jpg"
+}
+
 /** Generates and persists trace-line images. */
 class LineProcessing(
     private val storage: MediaStoreRepository
@@ -36,14 +45,12 @@ class LineProcessing(
         private set
     var savedTraceCount = 0
         private set
-    private var sessionId = createSessionId()
     private var collectionUserName = "Unspecified"
     private var collectionEmotion = "Unspecified"
 
     fun beginSession(userName: String? = null, emotionType: String? = null) {
         batchCount = 0
         savedTraceCount = 0
-        sessionId = createSessionId()
         collectionUserName = sanitizeCollectionPathSegment(userName.orEmpty())
         collectionEmotion = sanitizeCollectionPathSegment(emotionType.orEmpty())
     }
@@ -71,11 +78,11 @@ class LineProcessing(
 
     fun saveContourTraces(traces: Map<Settings.Trace.Type, Bitmap>) {
         if (traces.isEmpty()) return
-        val batchNumber = batchCount + 1
+        val capturedAt = Date()
         var savedAny = false
         traces.forEach { (type, bitmap) ->
             val directory = collectionDirectory(collectionUserName, collectionEmotion, type)
-            val fileName = "Trace_${sessionId}_$batchNumber.jpg"
+            val fileName = traceFileName(capturedAt, type, collectionUserName)
             if (storage.saveJpeg(bitmap, directory, fileName)) {
                 savedAny = true
                 savedTraceCount++
@@ -89,8 +96,5 @@ class LineProcessing(
 
     private companion object {
         const val TAG = "LineProcessing"
-
-        fun createSessionId(): String =
-            SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
     }
 }

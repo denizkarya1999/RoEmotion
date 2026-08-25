@@ -5,6 +5,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 class OperatingModeTest {
     @After
@@ -127,6 +129,21 @@ class OperatingModeTest {
         assertEquals(
             "Collected RoEmotion Data/User 01/Anxiety/Kalman Filter + CV Processing",
             collectionDirectory("User 01", "Anxiety", Settings.Trace.Type.SPLINE_CV)
+        )
+    }
+
+    @Test
+    fun traceFileNameContainsTimestampTypeAndSanitizedUser() {
+        val capturedAt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+            .parse("2026-08-25 14:30:52.417")!!
+
+        assertEquals(
+            "2026_08_25_14_30_52_417_RAW_CV_User 01.jpg",
+            traceFileName(capturedAt, Settings.Trace.Type.RAW_CV, "User 01")
+        )
+        assertEquals(
+            "2026_08_25_14_30_52_417_SPLINE_CV_User _ 01.jpg",
+            traceFileName(capturedAt, Settings.Trace.Type.SPLINE_CV, "User / 01")
         )
     }
 
