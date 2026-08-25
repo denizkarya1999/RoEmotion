@@ -35,8 +35,9 @@
         <!-- MainActivity.kt -->
         <activity
             android:name=".MainActivity"
-            android:theme="@style/Theme.App.Starting"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="fullSensor"
+            android:theme="@style/Theme.App.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -44,12 +45,18 @@
         </activity>
 
         <!-- LocalInferenceActivity.kt -->
-        <activity android:name=".inference.LocalInferenceActivity" />
+        <activity
+            android:name=".inference.LocalInferenceActivity"
+            android:screenOrientation="fullSensor" />
 
         <!-- AboutXameraActivity.kt -->
-        <activity android:name=".AboutXemotionActivity" />
+        <activity
+            android:name=".AboutXemotionActivity"
+            android:screenOrientation="fullSensor" />
 
         <!-- SettingsActivity.kt -->
-        <activity android:name=".SettingsActivity" />
+        <activity
+            android:name=".SettingsActivity"
+            android:screenOrientation="fullSensor" />
     </application>
 </manifest>
