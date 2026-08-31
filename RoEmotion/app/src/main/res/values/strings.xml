@@ -10,6 +10,12 @@
     <string name="collection_emotion_hint">Emotion type</string>
     <string name="collection_user_name_required">Enter a user name</string>
     <string name="collection_emotion_required">Enter an emotion type</string>
+    <string name="ook_collection_details_question">Who are you collecting data for, and what OOK signal modulation is being recorded?</string>
+    <string name="ook_modulation_hint">OOK signal modulation</string>
+    <string name="ook_modulation_required">Enter the OOK signal modulation</string>
+    <string name="ook_recording_started">Raw OOK video recording started</string>
+    <string name="ook_video_saved">Raw OOK video saved as %1$s</string>
+    <string name="ook_video_failed">Unable to save the raw OOK video</string>
     <plurals name="saved_trace_count">
         <item quantity="one">%d trace file saved</item>
         <item quantity="other">%d trace files saved</item>

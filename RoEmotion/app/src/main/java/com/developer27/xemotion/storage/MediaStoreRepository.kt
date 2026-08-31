@@ -6,16 +6,26 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.RequiresApi
 import java.io.File
+import java.io.FileDescriptor
 import java.io.FileOutputStream
 
 /** Centralizes public Pictures/Documents writes and Android-version handling. */
 class MediaStoreRepository(context: Context) {
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
+
+    class PendingVideo internal constructor(
+        val uri: Uri,
+        val fileDescriptor: FileDescriptor,
+        internal val descriptor: ParcelFileDescriptor,
+        internal val scopedStorage: Boolean,
+        internal val legacyFile: File?
+    )
 
     fun saveJpeg(bitmap: Bitmap, relativeDirectory: String, fileName: String): Boolean =
         runCatching {
@@ -45,6 +55,110 @@ class MediaStoreRepository(context: Context) {
         } else {
             writeDocumentLegacy(fileName, content, subdirectory)
         }
+
+    fun createPendingVideo(relativeDirectory: String, fileName: String): PendingVideo =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            createPendingVideoScoped(relativeDirectory, fileName)
+        } else {
+            createPendingVideoLegacy(relativeDirectory, fileName)
+        }
+
+    fun finishPendingVideo(video: PendingVideo, publish: Boolean): Boolean = runCatching {
+        video.descriptor.close()
+        if (video.scopedStorage) {
+            if (publish) {
+                check(
+                    resolver.update(
+                        video.uri,
+                        ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) },
+                        null,
+                        null
+                    ) > 0
+                ) { "MediaStore could not publish ${video.uri}" }
+            } else {
+                resolver.delete(video.uri, null, null)
+            }
+        } else if (!publish) {
+            video.legacyFile?.delete()
+        } else {
+            video.legacyFile?.let { file ->
+                android.media.MediaScannerConnection.scanFile(
+                    appContext,
+                    arrayOf(file.absolutePath),
+                    arrayOf(MP4_MIME_TYPE),
+                    null
+                )
+            }
+        }
+    }.onFailure { error ->
+        Log.e(TAG, "Unable to finish video ${video.uri}", error)
+        runCatching { video.descriptor.close() }
+        if (video.scopedStorage) {
+            runCatching { resolver.delete(video.uri, null, null) }
+        } else {
+            runCatching { video.legacyFile?.delete() }
+        }
+    }.isSuccess
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun createPendingVideoScoped(
+        relativeDirectory: String,
+        fileName: String
+    ): PendingVideo {
+        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val uri = requireNotNull(
+            resolver.insert(
+                collection,
+                ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Video.Media.MIME_TYPE, MP4_MIME_TYPE)
+                    put(
+                        MediaStore.Video.Media.RELATIVE_PATH,
+                        "${Environment.DIRECTORY_MOVIES}/$relativeDirectory"
+                    )
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+            )
+        ) { "MediaStore video insert failed" }
+        try {
+            val descriptor = requireNotNull(resolver.openFileDescriptor(uri, "w")) {
+                "MediaStore video descriptor could not be opened"
+            }
+            return PendingVideo(
+                uri = uri,
+                fileDescriptor = descriptor.fileDescriptor,
+                descriptor = descriptor,
+                scopedStorage = true,
+                legacyFile = null
+            )
+        } catch (error: Exception) {
+            resolver.delete(uri, null, null)
+            throw error
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun createPendingVideoLegacy(
+        relativeDirectory: String,
+        fileName: String
+    ): PendingVideo {
+        val movies = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        val directory = File(movies, relativeDirectory).apply { mkdirs() }
+        val file = File(directory, fileName)
+        val descriptor = ParcelFileDescriptor.open(
+            file,
+            ParcelFileDescriptor.MODE_CREATE or
+                ParcelFileDescriptor.MODE_TRUNCATE or
+                ParcelFileDescriptor.MODE_WRITE_ONLY
+        )
+        return PendingVideo(
+            uri = Uri.fromFile(file),
+            fileDescriptor = descriptor.fileDescriptor,
+            descriptor = descriptor,
+            scopedStorage = false,
+            legacyFile = file
+        )
+    }
 
     private fun saveJpegScoped(bitmap: Bitmap, directory: String, fileName: String) {
         val values = ContentValues().apply {
@@ -188,6 +302,7 @@ class MediaStoreRepository(context: Context) {
     private companion object {
         const val TAG = "MediaStoreRepository"
         const val JPEG_MIME_TYPE = "image/jpeg"
+        const val MP4_MIME_TYPE = "video/mp4"
         const val TEXT_MIME_TYPE = "text/plain"
         const val JPEG_QUALITY = 90
     }

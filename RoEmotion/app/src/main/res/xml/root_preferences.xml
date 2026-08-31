@@ -17,6 +17,21 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        android:title="Data Collection Options"
+        android:layout="@layout/preference_category_layout">
+
+        <ListPreference
+            android:key="data_collection_type"
+            android:layout="@layout/preference_list_layout"
+            android:title="Data Collection Type"
+            android:summary="%s"
+            android:dialogTitle="Select data collection type"
+            android:entries="@array/data_collection_type_options"
+            android:entryValues="@array/data_collection_type_values"
+            android:defaultValue="WRIST_TRACE" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
         android:title="Camera Settings"
         android:layout="@layout/preference_category_layout">
 

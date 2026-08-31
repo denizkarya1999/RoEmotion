@@ -27,6 +27,7 @@ import android.view.Surface
 import android.widget.Toast
 import androidx.annotation.RequiresPermission
 import com.developer27.xemotion.databinding.ActivityMainBinding
+import java.io.FileDescriptor
 import java.util.concurrent.Executor
 
 /**
@@ -83,6 +84,8 @@ class CameraHelper(
     private var openingCameraId: String? = null
     private var previewSurface: Surface? = null
     private var previewSessionPending = false
+    private var mediaRecorder: MediaRecorder? = null
+    private var rawVideoRecordingActive = false
 
     /**
      * Callback for camera device events
@@ -281,6 +284,7 @@ class CameraHelper(
     }
 
     fun closeCamera() {
+        stopRawVideoRecording(restartPreview = false)
         val session: CameraCaptureSession?
         val device: CameraDevice?
         val surface: Surface?
@@ -296,6 +300,8 @@ class CameraHelper(
             captureRequestBuilder = null
             previewSessionPending = false
         }
+        runCatching { session?.stopRepeating() }
+        runCatching { session?.abortCaptures() }
         session?.close()
         device?.close()
         surface?.release()
@@ -396,7 +402,7 @@ class CameraHelper(
                     showToast("Preview config failed.")
                 }
             }
-            createCaptureSession(device, surface, sessionCallback)
+            createCaptureSession(device, listOf(surface), sessionCallback)
             submitted = true
         } catch (e: CameraAccessException) {
             Log.e(TAG, "Unable to create the camera preview", e)
@@ -415,7 +421,7 @@ class CameraHelper(
 
     private fun createCaptureSession(
         device: CameraDevice,
-        surface: Surface,
+        surfaces: List<Surface>,
         callback: CameraCaptureSession.StateCallback
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -425,14 +431,14 @@ class CameraHelper(
             device.createCaptureSession(
                 SessionConfiguration(
                     SessionConfiguration.SESSION_REGULAR,
-                    listOf(OutputConfiguration(surface)),
+                    surfaces.map(::OutputConfiguration),
                     callbackExecutor,
                     callback
                 )
             )
         } else {
             @Suppress("DEPRECATION")
-            device.createCaptureSession(listOf(surface), callback, backgroundHandler)
+            device.createCaptureSession(surfaces, callback, backgroundHandler)
         }
     }
 
@@ -465,6 +471,280 @@ class CameraHelper(
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Camera session closed before preview update", e)
         }
+    }
+
+    /**
+     * Records the camera output surface directly to MP4. No TextureView bitmap, OpenCV result,
+     * bounding box, trace, or other app-rendered overlay is included in this stream.
+     */
+    fun startRawVideoRecording(
+        outputFileDescriptor: FileDescriptor,
+        onStarted: (Result<Unit>) -> Unit
+    ) {
+        val device: CameraDevice
+        val surface: Surface
+        val size: Size
+        val cameraId: String
+        synchronized(cameraStateLock) {
+            if (mediaRecorder != null || previewSessionPending) {
+                postRecordingResult(
+                    onStarted,
+                    Result.failure(IllegalStateException("The camera is busy."))
+                )
+                return
+            }
+            device = cameraDevice ?: run {
+                postRecordingResult(
+                    onStarted,
+                    Result.failure(IllegalStateException("The camera is not ready."))
+                )
+                return
+            }
+            surface = previewSurface ?: run {
+                postRecordingResult(
+                    onStarted,
+                    Result.failure(IllegalStateException("The camera preview is not ready."))
+                )
+                return
+            }
+            size = videoSize ?: run {
+                postRecordingResult(
+                    onStarted,
+                    Result.failure(IllegalStateException("No video size is available."))
+                )
+                return
+            }
+            cameraId = device.id
+        }
+
+        val recorder = createMediaRecorder()
+        try {
+            configureMediaRecorder(recorder, outputFileDescriptor, size, cameraId)
+            recorder.prepare()
+        } catch (error: Exception) {
+            runCatching { recorder.release() }
+            postRecordingResult(onStarted, Result.failure(error))
+            return
+        }
+
+        val recorderSurface = try {
+            recorder.surface
+        } catch (error: Exception) {
+            runCatching { recorder.release() }
+            postRecordingResult(onStarted, Result.failure(error))
+            return
+        }
+
+        val builder = try {
+            device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                addTarget(surface)
+                addTarget(recorderSurface)
+            }
+        } catch (error: Exception) {
+            runCatching { recorder.release() }
+            postRecordingResult(onStarted, Result.failure(error))
+            return
+        }
+
+        val oldSession: CameraCaptureSession?
+        val accepted = synchronized(cameraStateLock) {
+            if (!cameraRequested || cameraDevice !== device || previewSurface !== surface ||
+                mediaRecorder != null
+            ) {
+                oldSession = null
+                false
+            } else {
+                oldSession = cameraCaptureSession
+                cameraCaptureSession = null
+                captureRequestBuilder = builder
+                mediaRecorder = recorder
+                rawVideoRecordingActive = false
+                previewSessionPending = true
+                true
+            }
+        }
+        if (!accepted) {
+            runCatching { recorder.release() }
+            postRecordingResult(
+                onStarted,
+                Result.failure(IllegalStateException("The camera changed before recording started."))
+            )
+            return
+        }
+        oldSession?.close()
+
+        applyRollingShutter()
+        applyFlashIfEnabled()
+        applyLightingMode()
+        applyZoom(currentZoom)
+        builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+        builder.set(
+            CaptureRequest.COLOR_CORRECTION_MODE,
+            CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
+        )
+
+        val callback = object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                var startError: Throwable? = null
+                val started = synchronized(cameraStateLock) {
+                    previewSessionPending = false
+                    if (!cameraRequested || cameraDevice !== device ||
+                        mediaRecorder !== recorder || previewSurface !== surface
+                    ) {
+                        false
+                    } else {
+                        try {
+                            cameraCaptureSession = session
+                            session.setRepeatingRequest(builder.build(), null, backgroundHandler)
+                            recorder.start()
+                            rawVideoRecordingActive = true
+                            true
+                        } catch (error: Throwable) {
+                            startError = error
+                            cameraCaptureSession = null
+                            captureRequestBuilder = null
+                            mediaRecorder = null
+                            rawVideoRecordingActive = false
+                            false
+                        }
+                    }
+                }
+                if (started) {
+                    postRecordingResult(onStarted, Result.success(Unit))
+                } else {
+                    session.close()
+                    val shouldNotify = startError != null
+                    if (shouldNotify) {
+                        runCatching { recorder.release() }
+                        postRecordingResult(onStarted, Result.failure(checkNotNull(startError)))
+                        requestPreviewRecreation()
+                    }
+                }
+            }
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                session.close()
+                val shouldNotify = synchronized(cameraStateLock) {
+                    previewSessionPending = false
+                    if (mediaRecorder === recorder) {
+                        mediaRecorder = null
+                        rawVideoRecordingActive = false
+                        captureRequestBuilder = null
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (shouldNotify) {
+                    runCatching { recorder.release() }
+                    postRecordingResult(
+                        onStarted,
+                        Result.failure(IllegalStateException("Raw video session configuration failed."))
+                    )
+                    requestPreviewRecreation()
+                }
+            }
+        }
+
+        try {
+            createCaptureSession(device, listOf(surface, recorderSurface), callback)
+        } catch (error: Exception) {
+            val shouldNotify = synchronized(cameraStateLock) {
+                previewSessionPending = false
+                if (mediaRecorder === recorder) {
+                    mediaRecorder = null
+                    rawVideoRecordingActive = false
+                    captureRequestBuilder = null
+                    true
+                } else {
+                    false
+                }
+            }
+            if (shouldNotify) {
+                runCatching { recorder.release() }
+                postRecordingResult(onStarted, Result.failure(error))
+                requestPreviewRecreation()
+            }
+        }
+    }
+
+    fun stopRawVideoRecording(restartPreview: Boolean = true): Result<Unit> {
+        val recorder: MediaRecorder
+        val wasRecording: Boolean
+        val session: CameraCaptureSession?
+        synchronized(cameraStateLock) {
+            recorder = mediaRecorder
+                ?: return Result.failure(IllegalStateException("No raw video recording is active."))
+            wasRecording = rawVideoRecordingActive
+            mediaRecorder = null
+            rawVideoRecordingActive = false
+            previewSessionPending = false
+            session = cameraCaptureSession
+            cameraCaptureSession = null
+            captureRequestBuilder = null
+        }
+        runCatching { session?.stopRepeating() }
+        runCatching { session?.abortCaptures() }
+        session?.close()
+
+        val result = if (wasRecording) {
+            runCatching { recorder.stop() }
+        } else {
+            Result.failure(IllegalStateException("Raw video recording did not finish starting."))
+        }
+        runCatching { recorder.reset() }
+        runCatching { recorder.release() }
+        if (restartPreview) requestPreviewRecreation()
+        return result
+    }
+
+    @Suppress("DEPRECATION")
+    private fun createMediaRecorder(): MediaRecorder =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(activity) else MediaRecorder()
+
+    private fun configureMediaRecorder(
+        recorder: MediaRecorder,
+        outputFileDescriptor: FileDescriptor,
+        size: Size,
+        cameraId: String
+    ) {
+        recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+        recorder.setOutputFile(outputFileDescriptor)
+        recorder.setVideoEncodingBitRate(VIDEO_BIT_RATE)
+        recorder.setVideoFrameRate(VIDEO_FRAME_RATE)
+        recorder.setVideoSize(size.width, size.height)
+        recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+        recorder.setOrientationHint(videoOrientationHint(cameraId))
+    }
+
+    private fun videoOrientationHint(cameraId: String): Int {
+        val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+        val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
+        @Suppress("DEPRECATION")
+        val deviceDegrees = when (activity.windowManager.defaultDisplay.rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+        return if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+            (sensorOrientation + deviceDegrees) % 360
+        } else {
+            (sensorOrientation - deviceDegrees + 360) % 360
+        }
+    }
+
+    private fun postRecordingResult(
+        callback: (Result<Unit>) -> Unit,
+        result: Result<Unit>
+    ) {
+        activity.runOnUiThread { callback(result) }
+    }
+
+    private fun requestPreviewRecreation() {
+        viewBinding.viewFinder.post { createCameraPreview() }
     }
 
     // ------------------------------------------------------------------------
@@ -642,5 +922,7 @@ class CameraHelper(
         const val OPEN_ACTION_NONE = 0
         const val OPEN_ACTION_CREATE_PREVIEW = 1
         const val OPEN_ACTION_OPEN_DEVICE = 2
+        const val VIDEO_BIT_RATE = 10_000_000
+        const val VIDEO_FRAME_RATE = 30
     }
 }

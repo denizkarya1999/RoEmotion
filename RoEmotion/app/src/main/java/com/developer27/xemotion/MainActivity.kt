@@ -31,11 +31,14 @@ import com.developer27.xemotion.camera.CameraHelper
 import com.developer27.xemotion.databinding.ActivityMainBinding
 import com.developer27.xemotion.inference.EmotionInference
 import com.developer27.xemotion.inference.LocalInferenceActivity
+import com.developer27.xemotion.storage.MediaStoreRepository
+import com.developer27.xemotion.storage.ookVideoFileName
 import com.developer27.xemotion.ui.applySystemBarMargins
 import com.developer27.xemotion.ui.applySystemBarPadding
 import com.developer27.xemotion.ui.enableRoEmotionEdgeToEdge
 import com.developer27.xemotion.videoprocessing.Settings
 import com.developer27.xemotion.videoprocessing.VideoProcessor
+import java.util.Date
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
@@ -58,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     // AR Mode manager
     private lateinit var arModeManager: ArModeManager
     private var configuredOperatingMode: Settings.OperatingMode.Mode? = null
+    private lateinit var mediaStoreRepository: MediaStoreRepository
 
     // Flags for recording and processing states
     private var isRecording = false
@@ -68,6 +72,9 @@ class MainActivity : AppCompatActivity() {
     private var isActivityResumed = false
     private var isPermissionRequestInFlight = false
     private var collectionDialog: AlertDialog? = null
+    private var activeSessionType: ActiveSessionType? = null
+    private var pendingOokVideo: MediaStoreRepository.PendingVideo? = null
+    private var pendingOokVideoFileName: String? = null
     private var startCountdown: CountDownTimer? = null
     private val afterStopActions = mutableListOf<() -> Unit>()
 
@@ -91,6 +98,20 @@ class MainActivity : AppCompatActivity() {
         private const val COUNTDOWN_DURATION_SECONDS = 5L
         private const val COUNTDOWN_DURATION_MILLIS = COUNTDOWN_DURATION_SECONDS * 1_000L
         private const val MAX_PROCESSING_FRAME_EDGE = 1_280
+        private const val OOK_VIDEO_DIRECTORY =
+            "Collected RoEmotion Data/OOK Signal - User ID Data Collection"
+    }
+
+    private enum class ActiveSessionType {
+        WRIST_TRACE,
+        OOK_SIGNAL,
+        INFERENCE
+    }
+
+    private sealed interface SessionRequest {
+        data object Inference : SessionRequest
+        data class WristTrace(val userName: String, val emotion: String) : SessionRequest
+        data class OokSignal(val userName: String, val modulation: String) : SessionRequest
     }
 
     // TextureView listener for camera preview lifecycle
@@ -143,6 +164,7 @@ class MainActivity : AppCompatActivity() {
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
         Settings.load(sharedPreferences)
         cameraHelper = CameraHelper(this, viewBinding, sharedPreferences)
+        mediaStoreRepository = MediaStoreRepository(applicationContext)
         videoProcessor = VideoProcessor()
         emotionInference = EmotionInference(this, videoProcessor)
 
@@ -315,12 +337,26 @@ class MainActivity : AppCompatActivity() {
     // Start camera-frame processing and the independent inference session
     private fun startProcessingAndRecording() {
         if (isStopping || isCountingDown) return
-        if (videoProcessor?.isOpenCvReady != true) {
-            Toast.makeText(this, R.string.opencv_initialization_failed, Toast.LENGTH_LONG).show()
+        if (Settings.OperatingMode.current == Settings.OperatingMode.Mode.DATA_COLLECTION) {
+            when (Settings.DataCollection.current) {
+                Settings.DataCollection.Type.WRIST_TRACE -> {
+                    if (videoProcessor?.isOpenCvReady != true) {
+                        Toast.makeText(
+                            this,
+                            R.string.opencv_initialization_failed,
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return
+                    }
+                    promptForWristTraceCollectionDetails()
+                }
+
+                Settings.DataCollection.Type.OOK_SIGNAL -> promptForOokCollectionDetails()
+            }
             return
         }
-        if (Settings.OperatingMode.current == Settings.OperatingMode.Mode.DATA_COLLECTION) {
-            promptForCollectionDetails()
+        if (videoProcessor?.isOpenCvReady != true) {
+            Toast.makeText(this, R.string.opencv_initialization_failed, Toast.LENGTH_LONG).show()
             return
         }
         if (!emotionInference.areModelsLoaded()) {
@@ -328,10 +364,10 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Inference models are still loading.", Toast.LENGTH_SHORT).show()
             return
         }
-        beginStartCountdown(collectionUserName = null, collectionEmotion = null)
+        beginStartCountdown(SessionRequest.Inference)
     }
 
-    private fun promptForCollectionDetails() {
+    private fun promptForWristTraceCollectionDetails() {
         if (collectionDialog?.isShowing == true) return
         val userNameInput = EditText(this).apply {
             hint = getString(R.string.collection_user_name_hint)
@@ -374,7 +410,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (userName.isNotEmpty() && emotion.isNotEmpty()) {
                     dialog.dismiss()
-                    beginStartCountdown(userName, emotion)
+                    beginStartCountdown(SessionRequest.WristTrace(userName, emotion))
                 }
             }
             userNameInput.requestFocus()
@@ -382,12 +418,60 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun beginStartCountdown(
-        collectionUserName: String?,
-        collectionEmotion: String?
-    ) {
+    private fun promptForOokCollectionDetails() {
+        if (collectionDialog?.isShowing == true) return
+        val userNameInput = EditText(this).apply {
+            hint = getString(R.string.collection_user_name_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            isSingleLine = true
+        }
+        val modulationInput = EditText(this).apply {
+            hint = getString(R.string.ook_modulation_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            isSingleLine = true
+        }
+        val horizontalPadding = (24 * resources.displayMetrics.density).toInt()
+        val inputContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(horizontalPadding, 0, horizontalPadding, 0)
+            addView(userNameInput)
+            addView(modulationInput)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.data_collection_title)
+            .setMessage(R.string.ook_collection_details_question)
+            .setView(inputContainer)
+            .setPositiveButton(R.string.start_processing, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        collectionDialog = dialog
+        dialog.setOnDismissListener {
+            if (collectionDialog === dialog) collectionDialog = null
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val userName = userNameInput.text.toString().trim()
+                val modulation = modulationInput.text.toString().trim()
+                if (userName.isEmpty()) {
+                    userNameInput.error = getString(R.string.collection_user_name_required)
+                }
+                if (modulation.isEmpty()) {
+                    modulationInput.error = getString(R.string.ook_modulation_required)
+                }
+                if (userName.isNotEmpty() && modulation.isNotEmpty()) {
+                    dialog.dismiss()
+                    beginStartCountdown(SessionRequest.OokSignal(userName, modulation))
+                }
+            }
+            userNameInput.requestFocus()
+        }
+        dialog.show()
+    }
+
+    private fun beginStartCountdown(request: SessionRequest) {
         if (isRecording || isStopping || isCountingDown) return
         val requestedMode = Settings.OperatingMode.current
+        val requestedCollectionType = Settings.DataCollection.current
         isCountingDown = true
         viewBinding.countdownText.text = COUNTDOWN_DURATION_SECONDS.toString()
         viewBinding.countdownText.visibility = View.VISIBLE
@@ -407,7 +491,10 @@ class MainActivity : AppCompatActivity() {
                 hideCountdownOverlay()
                 updateOperatingModeUi()
                 if (!isActivityResumed || Settings.OperatingMode.current != requestedMode) return
-                beginProcessingSession(collectionUserName, collectionEmotion)
+                if (requestedMode == Settings.OperatingMode.Mode.DATA_COLLECTION &&
+                    Settings.DataCollection.current != requestedCollectionType
+                ) return
+                beginProcessingSession(request)
             }
         }.start()
     }
@@ -426,10 +513,7 @@ class MainActivity : AppCompatActivity() {
         viewBinding.countdownText.visibility = View.GONE
     }
 
-    private fun beginProcessingSession(
-        collectionUserName: String?,
-        collectionEmotion: String?
-    ) {
+    private fun beginProcessingSession(request: SessionRequest) {
         if (isStopping) return
         if (Settings.OperatingMode.current == Settings.OperatingMode.Mode.INFERENCE &&
             !emotionInference.areModelsLoaded()
@@ -438,8 +522,17 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Inference models are still loading.", Toast.LENGTH_SHORT).show()
             return
         }
+        if (request is SessionRequest.OokSignal) {
+            beginOokVideoSession(request)
+            return
+        }
         isRecording = true
         isProcessing = true
+        activeSessionType = when (request) {
+            SessionRequest.Inference -> ActiveSessionType.INFERENCE
+            is SessionRequest.WristTrace -> ActiveSessionType.WRIST_TRACE
+            is SessionRequest.OokSignal -> error("OOK sessions use the raw video path")
+        }
 
         // Update UI to tracking state
         viewBinding.startProcessingButton.text = getString(R.string.stop_processing)
@@ -447,7 +540,46 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.getColorStateList(this, R.color.red)
         viewBinding.processedFrameView.visibility = View.VISIBLE
 
-        emotionInference.startSession(collectionUserName, collectionEmotion)
+        val wristRequest = request as? SessionRequest.WristTrace
+        emotionInference.startSession(wristRequest?.userName, wristRequest?.emotion)
+    }
+
+    private fun beginOokVideoSession(request: SessionRequest.OokSignal) {
+        val fileName = ookVideoFileName(request.userName, request.modulation, Date())
+        val output = try {
+            mediaStoreRepository.createPendingVideo(OOK_VIDEO_DIRECTORY, fileName)
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to create OOK video output", error)
+            Toast.makeText(this, R.string.ook_video_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+
+        pendingOokVideo = output
+        pendingOokVideoFileName = fileName
+        activeSessionType = ActiveSessionType.OOK_SIGNAL
+        isRecording = true
+        isProcessing = false
+        viewBinding.processedFrameView.visibility = View.GONE
+        updateOperatingModeUi()
+
+        cameraHelper.startRawVideoRecording(output.fileDescriptor) { result ->
+            if (pendingOokVideo !== output || activeSessionType != ActiveSessionType.OOK_SIGNAL) {
+                return@startRawVideoRecording
+            }
+            result.onSuccess {
+                Toast.makeText(this, R.string.ook_recording_started, Toast.LENGTH_SHORT).show()
+            }.onFailure { error ->
+                Log.e(TAG, "Unable to start raw OOK video recording", error)
+                pendingOokVideo = null
+                pendingOokVideoFileName = null
+                mediaStoreRepository.finishPendingVideo(output, publish = false)
+                activeSessionType = null
+                isRecording = false
+                isProcessing = false
+                updateOperatingModeUi()
+                Toast.makeText(this, R.string.ook_video_failed, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     // Stop processing and run last export/inference pass if needed
@@ -464,9 +596,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        if (activeSessionType == ActiveSessionType.OOK_SIGNAL) {
+            stopOokVideoSession()
+            return
+        }
+
         isRecording = false
         isProcessing = false
         isStopping = true
+        activeSessionType = null
         viewBinding.startProcessingButton.isEnabled = false
 
         viewBinding.startProcessingButton.backgroundTintList =
@@ -491,6 +629,46 @@ class MainActivity : AppCompatActivity() {
             runAfterStopActions()
             if (isActivityResumed) applyOperatingModeConfiguration()
         }
+    }
+
+    private fun stopOokVideoSession() {
+        isRecording = false
+        isProcessing = false
+        isStopping = true
+        activeSessionType = null
+        viewBinding.startProcessingButton.isEnabled = false
+        viewBinding.processedFrameView.visibility = View.GONE
+        updateOperatingModeUi()
+
+        val stopResult = cameraHelper.stopRawVideoRecording()
+        val output = pendingOokVideo
+        val fileName = pendingOokVideoFileName
+        pendingOokVideo = null
+        pendingOokVideoFileName = null
+        val published = output != null && stopResult.isSuccess &&
+            mediaStoreRepository.finishPendingVideo(output, publish = true)
+        if (output != null && !published) {
+            if (stopResult.isFailure) {
+                mediaStoreRepository.finishPendingVideo(output, publish = false)
+            }
+        }
+
+        isStopping = false
+        if (published && fileName != null) {
+            Toast.makeText(
+                this,
+                getString(R.string.ook_video_saved, fileName),
+                Toast.LENGTH_LONG
+            ).show()
+        } else {
+            stopResult.exceptionOrNull()?.let { error ->
+                Log.e(TAG, "Unable to finish raw OOK video recording", error)
+            }
+            Toast.makeText(this, R.string.ook_video_failed, Toast.LENGTH_LONG).show()
+        }
+        updateOperatingModeUi()
+        runAfterStopActions()
+        if (isActivityResumed) applyOperatingModeConfiguration()
     }
 
     private fun runAfterStopActions() {
@@ -604,6 +782,13 @@ class MainActivity : AppCompatActivity() {
         isCountingDown = false
         collectionDialog?.dismiss()
         collectionDialog = null
+        pendingOokVideo?.let { output ->
+            cameraHelper.stopRawVideoRecording(restartPreview = false)
+            mediaStoreRepository.finishPendingVideo(output, publish = false)
+        }
+        pendingOokVideo = null
+        pendingOokVideoFileName = null
+        activeSessionType = null
         viewBinding.processedFrameView.setImageBitmap(null)
         displayedProcessedBitmap?.recycle()
         displayedProcessedBitmap = null

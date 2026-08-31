@@ -6,6 +6,7 @@ import org.opencv.core.Scalar
 /** Runtime configuration shared by camera, detection, drawing, and export pipelines. */
 object Settings {
     data class ModeCapabilities(
+        val dataCollectionTypeSettingsEnabled: Boolean,
         val traceCollectionSettingsEnabled: Boolean,
         val inferenceTraceSettingsEnabled: Boolean,
         val inferenceSettingsEnabled: Boolean,
@@ -21,6 +22,21 @@ object Settings {
 
         internal fun update(mode: Mode) {
             current = mode
+        }
+    }
+
+    object DataCollection {
+        enum class Type {
+            WRIST_TRACE,
+            OOK_SIGNAL
+        }
+
+        @Volatile
+        var current: Type = Type.WRIST_TRACE
+            private set
+
+        internal fun update(type: Type) {
+            current = type
         }
     }
 
@@ -172,7 +188,7 @@ object Settings {
             OperatingMode.Mode.DATA_COLLECTION -> {
                 DetectionMode.current = DetectionMode.Mode.CONTOUR
                 DetectionMode.enableYOLOinference = false
-                ExportData.frameIMG = true
+                ExportData.frameIMG = DataCollection.current == DataCollection.Type.WRIST_TRACE
             }
 
             OperatingMode.Mode.INFERENCE -> {
@@ -183,10 +199,19 @@ object Settings {
         }
     }
 
+    fun applyDataCollectionType(type: DataCollection.Type) {
+        DataCollection.update(type)
+        if (OperatingMode.current == OperatingMode.Mode.DATA_COLLECTION) {
+            applyOperatingMode(OperatingMode.Mode.DATA_COLLECTION)
+        }
+    }
+
     fun capabilitiesFor(mode: OperatingMode.Mode): ModeCapabilities {
         val inferenceMode = mode == OperatingMode.Mode.INFERENCE
         return ModeCapabilities(
-            traceCollectionSettingsEnabled = !inferenceMode,
+            dataCollectionTypeSettingsEnabled = !inferenceMode,
+            traceCollectionSettingsEnabled = !inferenceMode &&
+                DataCollection.current == DataCollection.Type.WRIST_TRACE,
             inferenceTraceSettingsEnabled = inferenceMode,
             inferenceSettingsEnabled = inferenceMode,
             inferenceActionsEnabled = inferenceMode
@@ -195,6 +220,14 @@ object Settings {
 
     /** Initializes runtime settings from the preferences persisted by SettingsActivity. */
     fun load(preferences: SharedPreferences) {
+        val dataCollectionType = runCatching {
+            DataCollection.Type.valueOf(
+                preferences.getString(KEY_DATA_COLLECTION_TYPE, DataCollection.Type.WRIST_TRACE.name)
+                    ?: DataCollection.Type.WRIST_TRACE.name
+            )
+        }.getOrDefault(DataCollection.Type.WRIST_TRACE)
+        DataCollection.update(dataCollectionType)
+
         val traceTypes = preferences.getStringSet(KEY_TRACE_TYPES, null)
             ?.mapNotNull { value -> runCatching { Trace.Type.valueOf(value) }.getOrNull() }
             ?.toSet()
@@ -235,6 +268,7 @@ object Settings {
     }
 
     const val KEY_OPERATING_MODE = "operating_mode"
+    const val KEY_DATA_COLLECTION_TYPE = "data_collection_type"
     const val KEY_TRACE_TYPES = "trace_types"
     const val KEY_INFERENCE_TRACE_TYPE = "inference_trace_type"
     const val KEY_TRACE_BOLDNESS = "trace_boldness"

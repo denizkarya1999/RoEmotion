@@ -10,6 +10,16 @@
         <item>INFERENCE</item>
     </string-array>
 
+    <string-array name="data_collection_type_options">
+        <item>Wrist Trace - Emotion Data Collection</item>
+        <item>OOK Signal - User ID Data Collection</item>
+    </string-array>
+
+    <string-array name="data_collection_type_values">
+        <item>WRIST_TRACE</item>
+        <item>OOK_SIGNAL</item>
+    </string-array>
+
     <string-array name="trace_type_options">
         <item>Raw</item>
         <item>Raw + CV Processing</item>

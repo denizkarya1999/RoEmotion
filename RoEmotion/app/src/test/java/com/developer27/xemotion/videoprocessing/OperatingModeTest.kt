@@ -11,6 +11,7 @@ import java.util.Locale
 class OperatingModeTest {
     @After
     fun restoreDefaultMode() {
+        Settings.applyDataCollectionType(Settings.DataCollection.Type.WRIST_TRACE)
         Settings.applyOperatingMode(Settings.OperatingMode.Mode.INFERENCE)
         Settings.Trace.updateCollectionTypes(Settings.Trace.DEFAULT_COLLECTION_TYPES)
         Settings.Trace.updateInferenceType(Settings.Trace.DEFAULT_TYPE)
@@ -48,8 +49,10 @@ class OperatingModeTest {
 
     @Test
     fun dataCollectionModeOnlyEnablesCollectionSpecificControls() {
+        Settings.applyDataCollectionType(Settings.DataCollection.Type.WRIST_TRACE)
         val capabilities = Settings.capabilitiesFor(Settings.OperatingMode.Mode.DATA_COLLECTION)
 
+        assertTrue(capabilities.dataCollectionTypeSettingsEnabled)
         assertTrue(capabilities.traceCollectionSettingsEnabled)
         assertFalse(capabilities.inferenceTraceSettingsEnabled)
         assertFalse(capabilities.inferenceSettingsEnabled)
@@ -60,10 +63,23 @@ class OperatingModeTest {
     fun inferenceModeOnlyEnablesInferenceSpecificControls() {
         val capabilities = Settings.capabilitiesFor(Settings.OperatingMode.Mode.INFERENCE)
 
+        assertFalse(capabilities.dataCollectionTypeSettingsEnabled)
         assertFalse(capabilities.traceCollectionSettingsEnabled)
         assertTrue(capabilities.inferenceTraceSettingsEnabled)
         assertTrue(capabilities.inferenceSettingsEnabled)
         assertTrue(capabilities.inferenceActionsEnabled)
+    }
+
+    @Test
+    fun ookCollectionDisablesTraceExportSettingsAndFrameProcessing() {
+        Settings.applyOperatingMode(Settings.OperatingMode.Mode.DATA_COLLECTION)
+        Settings.applyDataCollectionType(Settings.DataCollection.Type.OOK_SIGNAL)
+
+        val capabilities = Settings.capabilitiesFor(Settings.OperatingMode.Mode.DATA_COLLECTION)
+        assertTrue(capabilities.dataCollectionTypeSettingsEnabled)
+        assertFalse(capabilities.traceCollectionSettingsEnabled)
+        assertFalse(Settings.ExportData.frameIMG)
+        assertFalse(Settings.DetectionMode.enableYOLOinference)
     }
 
     @Test

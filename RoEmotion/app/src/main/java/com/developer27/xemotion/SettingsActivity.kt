@@ -52,7 +52,7 @@ class SettingsActivity : AppCompatActivity() {
                 Toast.makeText(
                     context,
                     if (mode == Settings.OperatingMode.Mode.DATA_COLLECTION) {
-                        "Data Collection Mode: contour tracking and automatic trace export"
+                        "Data Collection Mode: choose wrist traces or raw OOK video"
                     } else {
                         "Inference Mode: YOLO, ResNet-50, and AR"
                     },
@@ -60,6 +60,27 @@ class SettingsActivity : AppCompatActivity() {
                 ).show()
                 true
             }
+
+            findPreference<ListPreference>(Settings.KEY_DATA_COLLECTION_TYPE)
+                ?.setOnPreferenceChangeListener { _, newValue ->
+                    val type = (newValue as? String)
+                        ?.let { value ->
+                            runCatching { Settings.DataCollection.Type.valueOf(value) }.getOrNull()
+                        }
+                        ?: Settings.DataCollection.Type.WRIST_TRACE
+                    Settings.applyDataCollectionType(type)
+                    updateModeSpecificPreferences(Settings.OperatingMode.current)
+                    Toast.makeText(
+                        context,
+                        if (type == Settings.DataCollection.Type.WRIST_TRACE) {
+                            "Wrist trace emotion collection selected"
+                        } else {
+                            "Raw OOK video collection selected"
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    true
+                }
 
             // Rolling Shutter Speed listener.
             val shutterSpeedPref = findPreference<ListPreference>("shutter_speed")
@@ -197,6 +218,8 @@ class SettingsActivity : AppCompatActivity() {
 
         private fun updateModeSpecificPreferences(mode: Settings.OperatingMode.Mode) {
             val capabilities = Settings.capabilitiesFor(mode)
+            findPreference<ListPreference>(Settings.KEY_DATA_COLLECTION_TYPE)?.isEnabled =
+                capabilities.dataCollectionTypeSettingsEnabled
             findPreference<MultiSelectListPreference>(Settings.KEY_TRACE_TYPES)?.isEnabled =
                 capabilities.traceCollectionSettingsEnabled
             findPreference<ListPreference>(Settings.KEY_INFERENCE_TRACE_TYPE)?.isEnabled =
