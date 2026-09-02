@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string-array name="led_id_options">
+        <item>User 1 (OOK 10101)</item>
+        <item>User 2 (OOK 01110)</item>
+        <item>User 3 (OOK 00110)</item>
+    </string-array>
+
+    <string-array name="emotion_ground_truth_options">
+        <item>Select an emotion</item>
+        <item>Angry</item>
+        <item>Anxiety</item>
+        <item>Disgust</item>
+        <item>Excitement</item>
+        <item>Sadness</item>
+    </string-array>
+
     <string-array name="operating_mode_options">
         <item>Data Collection Mode</item>
         <item>Inference Mode</item>

@@ -20,8 +20,6 @@ class YoloProcessing(
 
     companion object {
         private const val TAG = "YoloProcessing"
-        private const val INPUT_W = 640
-        private const val INPUT_H = 640
         private const val TRACE_CAP = 300
     }
 
@@ -48,8 +46,8 @@ class YoloProcessing(
     private fun detectAndDraw(bitmap: Bitmap, model: YoloModelSession, outputMat: Mat) {
         val meta = YoloLedDetection.createLetterboxedBitmap(
             srcBitmap = bitmap,
-            targetWidth = INPUT_W,
-            targetHeight = INPUT_H
+            targetWidth = model.inputWidth,
+            targetHeight = model.inputHeight
         )
         val letterboxed = meta.inputBitmap
 
@@ -60,7 +58,7 @@ class YoloProcessing(
                 return
             }
 
-            val input = YoloLedDetection.bitmapToNormalizedTensorNHWC(letterboxed)
+            val input = YoloLedDetection.bitmapToNormalizedTensorNCHW(letterboxed)
             val output = model.run(input)
 
             val detections = YoloLedDetection
@@ -72,8 +70,8 @@ class YoloProcessing(
                 originalWidth = bitmap.width,
                 originalHeight = bitmap.height,
                 padOffsets = meta.padLeft to meta.padTop,
-                modelInputWidth = INPUT_W,
-                modelInputHeight = INPUT_H,
+                modelInputWidth = model.inputWidth,
+                modelInputHeight = model.inputHeight,
                 scale = meta.scale
             )
 

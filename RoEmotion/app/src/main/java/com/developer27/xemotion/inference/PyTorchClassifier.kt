@@ -19,6 +19,7 @@ class PyTorchClassifier internal constructor(
     private val closed = AtomicBoolean(false)
 
     fun classifySequence(frames: List<Bitmap>): Pair<String, FloatArray> {
+        check(!closed.get()) { "The emotion classifier is closed." }
         require(frames.isNotEmpty()) { "At least one frame is required for classification." }
 
         val valuesPerFrame = 3 * inputHeight * inputWidth
@@ -38,12 +39,12 @@ class PyTorchClassifier internal constructor(
         val logits = module.forward(IValue.from(sequenceTensor)).toTensor().dataAsFloatArray
         val probabilities = softmax(logits)
         val bestIndex = probabilities.indices.maxByOrNull(probabilities::get) ?: 0
-        return LABELS.getOrElse(bestIndex) { "Unknown" } to probabilities
+        return emotionLabels.getOrElse(bestIndex) { "Unknown" } to probabilities
     }
 
     fun logProbabilities(probabilities: FloatArray) {
         probabilities.forEachIndexed { index, probability ->
-            Log.d(TAG, "${LABELS.getOrNull(index) ?: "Label$index"}: $probability")
+            Log.d(TAG, "${emotionLabels.getOrNull(index) ?: "Label$index"}: $probability")
         }
     }
 
@@ -101,9 +102,10 @@ class PyTorchClassifier internal constructor(
         if (closed.compareAndSet(false, true)) module.destroy()
     }
 
-    private companion object {
-        const val TAG = "PyTorchClassifier"
-        const val RESIZE_SHORT_SIDE = 256
-        val LABELS = listOf("Angry", "Anxiety", "Disgust", "Excitement", "Sadness")
+    companion object {
+        val emotionLabels = listOf("Angry", "Anxiety", "Disgust", "Excitement", "Sadness")
+
+        private const val TAG = "PyTorchClassifier"
+        private const val RESIZE_SHORT_SIDE = 256
     }
 }

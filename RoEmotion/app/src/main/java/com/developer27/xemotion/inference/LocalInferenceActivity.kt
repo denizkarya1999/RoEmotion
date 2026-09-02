@@ -2,32 +2,23 @@ package com.developer27.xemotion.inference
 
 import android.app.AlertDialog
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import android.widget.AdapterView
 import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.ProgressBar
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.ViewModelProvider
 import com.developer27.xemotion.R
-import com.developer27.xemotion.inference.local.DatasetInput
-import com.developer27.xemotion.inference.local.DatasetInputType
-import com.developer27.xemotion.inference.local.DatasetKind
-import com.developer27.xemotion.inference.local.LocalDatasetInputResolver
-import com.developer27.xemotion.inference.local.LocalInferenceReportStore
-import com.developer27.xemotion.inference.local.LocalInferenceViewModel
-import com.developer27.xemotion.inference.local.PreparedDatasetRoot
-import com.developer27.xemotion.inference.local.ResNetDatasetParser
-import com.developer27.xemotion.inference.local.ResNetDatasetEvaluator
-import com.developer27.xemotion.inference.local.YoloDatasetEvaluator
-import com.developer27.xemotion.inference.local.YoloDatasetParser
+import com.developer27.xemotion.inference.local.StandaloneInferenceViewModel
 import com.developer27.xemotion.ui.applySystemBarPadding
 import com.developer27.xemotion.ui.enableRoEmotionEdgeToEdge
 import kotlinx.coroutines.CancellationException
@@ -37,335 +28,284 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
+import org.opencv.android.OpenCVLoader
+import java.util.Locale
 
+/** Runs the bundled models over user-selected images without starting the camera. */
 class LocalInferenceActivity : AppCompatActivity() {
 
-    companion object {
-        private const val TAG = "LocalInferenceActivity"
+    private lateinit var selectLedImagesButton: Button
+    private lateinit var ledSelectionTextView: TextView
+    private lateinit var selectLedGroundTruthButton: Button
+    private lateinit var ledGroundTruthTextView: TextView
+    private lateinit var inferLedButton: Button
+    private lateinit var ledResultsTextView: TextView
+    private lateinit var selectEmotionImagesButton: Button
+    private lateinit var emotionSelectionTextView: TextView
+    private lateinit var emotionGroundTruthSpinner: Spinner
+    private lateinit var inferEmotionButton: Button
+    private lateinit var emotionResultsTextView: TextView
 
-        // Fixed YOLO input size used by the TFLite model
-        private const val YOLO_INPUT_W = 640
-        private const val YOLO_INPUT_H = 640
-
-    }
-
-    private lateinit var yoloDatasetPathEditText: EditText
-    private lateinit var resnetDatasetPathEditText: EditText
-    private lateinit var selectYoloDatasetButton: Button
-    private lateinit var selectResnetDatasetButton: Button
-    private lateinit var inferYoloButton: Button
-    private lateinit var inferResnetButton: Button
-
-    private lateinit var viewModel: LocalInferenceViewModel
+    private lateinit var viewModel: StandaloneInferenceViewModel
     private val activityJob = SupervisorJob()
     private val activityScope = CoroutineScope(activityJob + Dispatchers.Main)
     private val modelLock = Any()
     private var yoloModel: YoloModelSession? = null
-    private var pytorchClassifier: PyTorchClassifier? = null
+    private var emotionClassifier: PyTorchClassifier? = null
 
-    private val inputResolver by lazy { LocalDatasetInputResolver(this) }
     private val modelLoader by lazy { PyTorchModelLoader(applicationContext) }
-    private val yoloDatasetParser = YoloDatasetParser()
-    private val resNetDatasetParser = ResNetDatasetParser()
-    private val yoloDatasetEvaluator = YoloDatasetEvaluator(yoloDatasetParser)
-    private val resNetDatasetEvaluator = ResNetDatasetEvaluator(resNetDatasetParser)
-    private val reportStore by lazy { LocalInferenceReportStore(this) }
+    private val openCvReady by lazy { OpenCVLoader.initLocal() }
 
-    // Folder picker
-    private val openDatasetTreeLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            if (uri == null) return@registerForActivityResult
-
-            try {
-                // Persist read permission for future access
-                contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: Exception) {
-            }
-
-            val kind = viewModel.pendingDatasetKind ?: return@registerForActivityResult
-            val picked = DatasetInput(uri, DatasetInputType.FOLDER)
-            viewModel.setInput(kind, picked)
-            when (kind) {
-                DatasetKind.YOLO -> {
-                    yoloDatasetPathEditText.setText(uri.toString())
-                }
-                DatasetKind.RESNET -> {
-                    resnetDatasetPathEditText.setText(uri.toString())
-                }
-            }
+    private val openLedImagesLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isEmpty()) return@registerForActivityResult
+            retainReadAccess(uris)
+            viewModel.ledImageUris = uris
+            viewModel.ledResults = ""
+            renderState()
         }
 
-    // ZIP file picker
-    private val openZipFileLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) return@registerForActivityResult
-
-            try {
-                // Persist read permission for future access
-                contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: Exception) {
-            }
-
-            val kind = viewModel.pendingDatasetKind ?: return@registerForActivityResult
-            val picked = DatasetInput(uri, DatasetInputType.ZIP)
-            viewModel.setInput(kind, picked)
-            when (kind) {
-                DatasetKind.YOLO -> {
-                    yoloDatasetPathEditText.setText(uri.toString())
-                }
-                DatasetKind.RESNET -> {
-                    resnetDatasetPathEditText.setText(uri.toString())
-                }
-            }
+    private val openEmotionImagesLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isEmpty()) return@registerForActivityResult
+            retainReadAccess(uris)
+            viewModel.emotionImageUris = uris
+            viewModel.emotionResults = ""
+            renderState()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableRoEmotionEdgeToEdge()
-
-        // Keep the device awake while processing a dataset.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
         setContentView(R.layout.activity_local_inference)
         findViewById<View>(R.id.local_inference_root).applySystemBarPadding()
 
-        viewModel = ViewModelProvider(this)[LocalInferenceViewModel::class.java]
+        viewModel = ViewModelProvider(this)[StandaloneInferenceViewModel::class.java]
         bindViews()
-        setupClickListeners()
+        setupControls()
+        renderState()
     }
 
     private fun bindViews() {
-        yoloDatasetPathEditText = findViewById(R.id.yoloDatasetPathEditText)
-        resnetDatasetPathEditText = findViewById(R.id.resnetDatasetPathEditText)
-        selectYoloDatasetButton = findViewById(R.id.selectYoloDatasetButton)
-        selectResnetDatasetButton = findViewById(R.id.selectResnetDatasetButton)
-        inferYoloButton = findViewById(R.id.inferYoloButton)
-        inferResnetButton = findViewById(R.id.inferResnetButton)
+        selectLedImagesButton = findViewById(R.id.selectLedImagesButton)
+        ledSelectionTextView = findViewById(R.id.ledSelectionTextView)
+        selectLedGroundTruthButton = findViewById(R.id.selectLedGroundTruthButton)
+        ledGroundTruthTextView = findViewById(R.id.ledGroundTruthTextView)
+        inferLedButton = findViewById(R.id.inferLedButton)
+        ledResultsTextView = findViewById(R.id.ledResultsTextView)
+        selectEmotionImagesButton = findViewById(R.id.selectEmotionImagesButton)
+        emotionSelectionTextView = findViewById(R.id.emotionSelectionTextView)
+        emotionGroundTruthSpinner = findViewById(R.id.emotionGroundTruthSpinner)
+        inferEmotionButton = findViewById(R.id.inferEmotionButton)
+        emotionResultsTextView = findViewById(R.id.emotionResultsTextView)
     }
 
-    private fun setupClickListeners() {
-        selectYoloDatasetButton.setOnClickListener {
-            viewModel.pendingDatasetKind = DatasetKind.YOLO
-            showInputPickerTypeDialog()
+    private fun setupControls() {
+        selectLedImagesButton.setOnClickListener {
+            openLedImagesLauncher.launch(arrayOf("image/*"))
         }
+        selectLedGroundTruthButton.setOnClickListener(::showLedGroundTruthDialog)
+        inferLedButton.setOnClickListener { runLedInference() }
 
-        selectResnetDatasetButton.setOnClickListener {
-            viewModel.pendingDatasetKind = DatasetKind.RESNET
-            showInputPickerTypeDialog()
+        selectEmotionImagesButton.setOnClickListener {
+            openEmotionImagesLauncher.launch(arrayOf("image/*"))
         }
+        emotionGroundTruthSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                viewModel.emotionGroundTruth = PyTorchClassifier.emotionLabels.getOrNull(position - 1)
+            }
 
-        inferYoloButton.setOnClickListener {
-            runSelectedDataset(DatasetKind.YOLO, inferYoloButton)
-        }
-
-        inferResnetButton.setOnClickListener {
-            runSelectedDataset(DatasetKind.RESNET, inferResnetButton)
-        }
-    }
-
-    private fun runSelectedDataset(kind: DatasetKind, button: Button) {
-        val input = viewModel.inputFor(kind)
-        if (input == null) {
-            Toast.makeText(this, "Select a dataset first.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        button.isEnabled = false
-        activityScope.launch {
-            try {
-                when (kind) {
-                    DatasetKind.YOLO -> runYoloInferenceOverDataset(input)
-                    DatasetKind.RESNET -> runResNetInferenceOverDataset(input)
-                }
-            } finally {
-                button.isEnabled = true
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+                viewModel.emotionGroundTruth = null
             }
         }
+        inferEmotionButton.setOnClickListener { runEmotionInference() }
     }
 
-    // -------------------------------------------------------------------------
-    // UI helpers
-    // -------------------------------------------------------------------------
+    private fun renderState() {
+        ledSelectionTextView.text = selectionSummary(viewModel.ledImageUris)
+        ledGroundTruthTextView.text = when {
+            !viewModel.isLedGroundTruthConfigured -> getString(R.string.ground_truth_not_set)
+            viewModel.ledGroundTruthClassIds.isEmpty() -> getString(R.string.no_led_ids)
+            else -> viewModel.ledGroundTruthClassIds.sorted()
+                .joinToString { YoloLedDetection.displayLabelForClass(it) }
+        }
+        ledResultsTextView.text = viewModel.ledResults.ifBlank {
+            getString(R.string.inference_results_placeholder)
+        }
+        emotionSelectionTextView.text = selectionSummary(viewModel.emotionImageUris)
+        emotionGroundTruthSpinner.setSelection(
+            viewModel.emotionGroundTruth
+                ?.let(PyTorchClassifier.emotionLabels::indexOf)
+                ?.takeIf { it >= 0 }
+                ?.plus(1)
+                ?: 0,
+            false
+        )
+        emotionResultsTextView.text = viewModel.emotionResults.ifBlank {
+            getString(R.string.inference_results_placeholder)
+        }
+    }
 
-    private fun showInputPickerTypeDialog() {
+    private fun showLedGroundTruthDialog(@Suppress("UNUSED_PARAMETER") ignored: View) {
+        val checked = BooleanArray(YoloLedDetection.userLabels.size) { index ->
+            index in viewModel.ledGroundTruthClassIds
+        }
         AlertDialog.Builder(this)
-            .setTitle("Select Input Type")
-            .setItems(arrayOf("Folder", "ZIP File")) { _, which ->
-                when (which) {
-                    0 -> {
-                        openDatasetTreeLauncher.launch(null)
-                    }
-
-                    1 -> {
-                        openZipFileLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                    }
-                }
+            .setTitle(R.string.select_ground_truth_led_ids)
+            .setMultiChoiceItems(R.array.led_id_options, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setNeutralButton(R.string.no_led_ids) { _, _ ->
+                viewModel.ledGroundTruthClassIds = emptySet()
+                viewModel.isLedGroundTruthConfigured = true
+                viewModel.ledResults = ""
+                renderState()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                viewModel.ledGroundTruthClassIds = checked.indices.filterTo(mutableSetOf()) { checked[it] }
+                viewModel.isLedGroundTruthConfigured = true
+                viewModel.ledResults = ""
+                renderState()
             }
             .show()
     }
 
-    private data class ProgressUi(
-        val dialog: AlertDialog,
-        val progressBar: ProgressBar,
-        val statusTextView: TextView
-    )
-
-    private data class InferenceResult(
-        val title: String,
-        val fileName: String,
-        val savedUri: Uri?,
-        val reportText: String
-    )
-
-    private suspend fun createProgressDialog(title: String): ProgressUi = withContext(Dispatchers.Main) {
-        val container = LinearLayout(this@LocalInferenceActivity).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 40, 48, 16)
+    private fun runLedInference() {
+        if (viewModel.ledImageUris.isEmpty()) {
+            toast(R.string.select_led_images_first)
+            return
+        }
+        if (!viewModel.isLedGroundTruthConfigured) {
+            toast(R.string.select_led_ground_truth_first)
+            return
         }
 
-        val titleView = TextView(this@LocalInferenceActivity).apply {
-            text = title
-            textSize = 18f
-        }
-
-        val progressBar = ProgressBar(
-            this@LocalInferenceActivity,
-            null,
-            android.R.attr.progressBarStyleHorizontal
-        ).apply {
-            isIndeterminate = false
-            max = 100
-            progress = 0
-        }
-
-        val statusView = TextView(this@LocalInferenceActivity).apply {
-            text = "Preparing..."
-            setPadding(0, 24, 0, 0)
-        }
-
-        container.addView(titleView)
-        container.addView(progressBar)
-        container.addView(statusView)
-
-        val dialog = AlertDialog.Builder(this@LocalInferenceActivity)
-            .setView(container)
-            .setCancelable(false)
-            .create()
-
-        dialog.show()
-        ProgressUi(dialog, progressBar, statusView)
-    }
-
-    private suspend fun updateProgress(ui: ProgressUi, current: Int, total: Int, message: String) {
-        withContext(Dispatchers.Main) {
-            val progress = if (total <= 0) {
-                0
-            } else {
-                ((current.toFloat() / total.toFloat()) * 100f).roundToInt()
-            }
-
-            ui.progressBar.progress = progress.coerceIn(0, 100)
-            ui.statusTextView.text = "$message ($current / $total)"
-        }
-    }
-
-    private suspend fun closeProgressDialog(ui: ProgressUi) {
-        withContext(Dispatchers.Main) {
-            if (ui.dialog.isShowing) ui.dialog.dismiss()
-        }
-    }
-
-    private suspend fun showMessageBox(title: String, message: String) {
-        withContext(Dispatchers.Main) {
-            AlertDialog.Builder(this@LocalInferenceActivity)
-                .setTitle(title)
-                .setMessage(message)
-                .setPositiveButton("OK", null)
-                .show()
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Input preparation (Folder / ZIP -> local File root)
-    // -------------------------------------------------------------------------
-
-    private suspend fun prepareInputRoot(
-        input: DatasetInput,
-        kind: DatasetKind,
-        progressUi: ProgressUi
-    ): PreparedDatasetRoot = inputResolver.prepare(
-        input = input,
-        kind = kind,
-        onProgress = { current, total, message ->
-            updateProgress(progressUi, current, total, message)
-        }
-    )
-
-    // -------------------------------------------------------------------------
-    // YOLO dataset inference
-    // -------------------------------------------------------------------------
-
-    private suspend fun runYoloInferenceOverDataset(input: DatasetInput) {
-        val progressUi = createProgressDialog("YOLO Dataset Inference")
-        try {
-            val result = withContext(Dispatchers.IO) {
-                val prepared = prepareInputRoot(input, DatasetKind.YOLO, progressUi)
-                try {
+        setControlsEnabled(false)
+        ledResultsTextView.text = getString(R.string.loading_led_model)
+        activityScope.launch {
+            try {
+                val groundTruth = viewModel.ledGroundTruthClassIds
+                val result = withContext(Dispatchers.IO) {
+                    require(openCvReady) { getString(R.string.opencv_initialization_failed) }
                     val model = getOrCreateYoloModel()
-                    val report = yoloDatasetEvaluator.evaluate(
-                        root = prepared.directory,
-                        inputDescription = prepared.description,
-                        predictor = { bitmap -> runSingleYoloInference(bitmap, model) },
-                        onProgress = { current, total, message ->
-                            updateProgress(progressUi, current, total, message)
+                    buildString {
+                        appendLine("LED ID Detection Results")
+                        appendLine("Ground truth for each image: ${formatLedClasses(groundTruth)}")
+                        appendLine()
+                        var exactMatches = 0
+                        viewModel.ledImageUris.forEachIndexed { index, uri ->
+                            withContext(Dispatchers.Main) {
+                                ledResultsTextView.text = getString(
+                                    R.string.processing_images_progress,
+                                    index + 1,
+                                    viewModel.ledImageUris.size
+                                )
+                            }
+                            val bitmap = decodeBitmap(uri)
+                                ?: throw IllegalArgumentException("Could not decode ${displayName(uri)}")
+                            val detections = try {
+                                YoloLedDetection.pickOnePerClass(runSingleYoloInference(bitmap, model))
+                            } finally {
+                                bitmap.recycle()
+                            }
+                            val predicted = detections.map(YoloDet::classId).toSet()
+                            val exactMatch = groundTruth == predicted
+                            if (exactMatch) exactMatches++
+                            appendLine(displayName(uri))
+                            appendLine("  Ground truth: ${formatLedClasses(groundTruth)}")
+                            appendLine("  Predicted: ${formatLedDetections(detections)}")
+                            appendLine("  Exact match: ${if (exactMatch) "Yes" else "No"}")
+                            appendLine()
                         }
-                    )
-                    val fileName = "yolo_inference_${reportStore.fileTimestamp()}.txt"
-                    InferenceResult(
-                        title = "YOLO Inference Finished",
-                        fileName = fileName,
-                        savedUri = reportStore.save(fileName, report),
-                        reportText = report
-                    )
-                } finally {
-                    prepared.cleanup()
+                        appendLine("Exact matches: $exactMatches / ${viewModel.ledImageUris.size}")
+                    }
                 }
+                viewModel.ledResults = result.trimEnd()
+            } catch (error: Exception) {
+                Log.e(TAG, "Standalone LED inference failed", error)
+                viewModel.ledResults = getString(
+                    R.string.inference_failed_with_reason,
+                    error.message ?: getString(R.string.unknown_error)
+                )
+            } finally {
+                renderState()
+                setControlsEnabled(true)
             }
-            closeProgressDialog(progressUi)
-            showMessageBox(
-                result.title,
-                reportStore.buildSummary(result.fileName, result.savedUri, result.reportText)
-            )
-        } catch (error: Exception) {
-            Log.e(TAG, "YOLO inference failed", error)
-            closeProgressDialog(progressUi)
-            showMessageBox("YOLO Inference Error", error.message ?: "Unknown error")
         }
     }
+
+    private fun runEmotionInference() {
+        val groundTruth = viewModel.emotionGroundTruth
+        if (viewModel.emotionImageUris.isEmpty()) {
+            toast(R.string.select_emotion_images_first)
+            return
+        }
+        if (groundTruth == null) {
+            toast(R.string.select_emotion_ground_truth_first)
+            return
+        }
+
+        setControlsEnabled(false)
+        emotionResultsTextView.text = getString(R.string.loading_emotion_model)
+        activityScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val bitmaps = mutableListOf<Bitmap>()
+                    try {
+                        val sequenceUris = sampleSequence(viewModel.emotionImageUris, EMOTION_SEQUENCE_LENGTH)
+                        sequenceUris.forEach { uri ->
+                            bitmaps += decodeBitmap(uri)
+                                ?: throw IllegalArgumentException("Could not decode ${displayName(uri)}")
+                        }
+                        val classifier = getOrCreateEmotionClassifier()
+                        val (prediction, probabilities) = classifier.classifySequence(bitmaps)
+                        val bestIndex = probabilities.indices.maxByOrNull(probabilities::get) ?: 0
+                        val confidence = probabilities.getOrElse(bestIndex) { 0f }
+                        buildString {
+                            appendLine("Emotion Recognition Results")
+                            appendLine("Images selected: ${viewModel.emotionImageUris.size}")
+                            appendLine("Frames used by model: ${bitmaps.size}")
+                            appendLine("Ground truth: $groundTruth")
+                            appendLine("Predicted: $prediction (${formatPercent(confidence)})")
+                            appendLine("Match: ${if (groundTruth.equals(prediction, true)) "Yes" else "No"}")
+                            appendLine()
+                            appendLine("Probabilities")
+                            PyTorchClassifier.emotionLabels.forEachIndexed { index, label ->
+                                appendLine("  $label: ${formatPercent(probabilities.getOrElse(index) { 0f })}")
+                            }
+                        }
+                    } finally {
+                        bitmaps.forEach(Bitmap::recycle)
+                    }
+                }
+                viewModel.emotionResults = result.trimEnd()
+            } catch (error: Exception) {
+                Log.e(TAG, "Standalone emotion inference failed", error)
+                viewModel.emotionResults = getString(
+                    R.string.inference_failed_with_reason,
+                    error.message ?: getString(R.string.unknown_error)
+                )
+            } finally {
+                renderState()
+                setControlsEnabled(true)
+            }
+        }
+    }
+
     private fun runSingleYoloInference(bitmap: Bitmap, model: YoloModelSession): List<YoloDet> {
-        // Resize/pad image to the model input size
         val meta = YoloLedDetection.createLetterboxedBitmap(
             srcBitmap = bitmap,
-            targetWidth = YOLO_INPUT_W,
-            targetHeight = YOLO_INPUT_H
+            targetWidth = model.inputWidth,
+            targetHeight = model.inputHeight
         )
-
         return try {
-            val shape = model.outputShape
-            require(shape.size == 3) {
-                "Unsupported YOLO output shape: ${shape.contentToString()}"
-            }
-            val input = YoloLedDetection.bitmapToNormalizedTensorNHWC(meta.inputBitmap)
-            YoloLedDetection.parseTFLite(model.run(input), shape)
+            val input = YoloLedDetection.bitmapToNormalizedTensorNCHW(meta.inputBitmap)
+            YoloLedDetection.parseTFLite(model.run(input), model.outputShape)
         } finally {
-            if (!meta.inputBitmap.isRecycled) meta.inputBitmap.recycle()
+            meta.inputBitmap.recycle()
         }
     }
 
@@ -382,59 +322,100 @@ class LocalInferenceActivity : AppCompatActivity() {
         if (retained !== loaded) loaded.close()
         return retained ?: throw CancellationException("Activity was destroyed")
     }
-    // -------------------------------------------------------------------------
-    // ResNet dataset inference
-    // -------------------------------------------------------------------------
 
-    private suspend fun runResNetInferenceOverDataset(input: DatasetInput) {
-        val progressUi = createProgressDialog("ResNet Dataset Inference")
-        try {
-            val result = withContext(Dispatchers.IO) {
-                val prepared = prepareInputRoot(input, DatasetKind.RESNET, progressUi)
-                try {
-                    val classifier = getOrCreatePyTorchClassifier()
-                    val report = resNetDatasetEvaluator.evaluate(
-                        root = prepared.directory,
-                        inputDescription = prepared.description,
-                        predictor = classifier::classifySequence,
-                        onProgress = { current, total, message ->
-                            updateProgress(progressUi, current, total, message)
-                        }
-                    )
-                    val fileName = "resnet_inference_${reportStore.fileTimestamp()}.txt"
-                    InferenceResult(
-                        title = "ResNet Inference Finished",
-                        fileName = fileName,
-                        savedUri = reportStore.save(fileName, report),
-                        reportText = report
-                    )
-                } finally {
-                    prepared.cleanup()
-                }
-            }
-            closeProgressDialog(progressUi)
-            showMessageBox(
-                result.title,
-                reportStore.buildSummary(result.fileName, result.savedUri, result.reportText)
-            )
-        } catch (error: Exception) {
-            Log.e(TAG, "ResNet inference failed", error)
-            closeProgressDialog(progressUi)
-            showMessageBox("ResNet Inference Error", error.message ?: "Unknown error")
-        }
-    }
-    private fun getOrCreatePyTorchClassifier(): PyTorchClassifier {
-        synchronized(modelLock) { pytorchClassifier?.let { return it } }
+    private fun getOrCreateEmotionClassifier(): PyTorchClassifier {
+        synchronized(modelLock) { emotionClassifier?.let { return it } }
         val loaded = modelLoader.loadEmotionClassifier()
         val retained = synchronized(modelLock) {
             when {
                 !activityScope.isActive -> null
-                pytorchClassifier != null -> pytorchClassifier
-                else -> loaded.also { pytorchClassifier = it }
+                emotionClassifier != null -> emotionClassifier
+                else -> loaded.also { emotionClassifier = it }
             }
         }
         if (retained !== loaded) loaded.close()
         return retained ?: throw CancellationException("Activity was destroyed")
+    }
+
+    private fun decodeBitmap(uri: Uri): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var sampleSize = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sampleSize > MAX_DECODED_IMAGE_EDGE) {
+            sampleSize *= 2
+        }
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, options)
+        }
+    }
+
+    private fun <T> sampleSequence(items: List<T>, length: Int): List<T> = when {
+        items.size == length -> items
+        items.size > length -> List(length) { index ->
+            items[(index * items.lastIndex.toDouble() / (length - 1)).toInt()]
+        }
+        else -> items + List(length - items.size) { items.last() }
+    }
+
+    private fun selectionSummary(uris: List<Uri>): String = when (uris.size) {
+        0 -> getString(R.string.no_images_selected)
+        1 -> getString(R.string.one_image_selected, displayName(uris.single()))
+        else -> resources.getQuantityString(R.plurals.images_selected, uris.size, uris.size)
+    }
+
+    private fun displayName(uri: Uri): String {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) {
+                    cursor.getString(index)?.takeIf(String::isNotBlank)?.let { return it }
+                }
+            }
+        }
+        return uri.lastPathSegment ?: uri.toString()
+    }
+
+    private fun formatLedClasses(classIds: Set<Int>): String =
+        if (classIds.isEmpty()) getString(R.string.no_led_ids)
+        else classIds.sorted().joinToString { YoloLedDetection.displayLabelForClass(it) }
+
+    private fun formatLedDetections(detections: List<YoloDet>): String =
+        if (detections.isEmpty()) getString(R.string.no_led_ids)
+        else detections.sortedBy(YoloDet::classId).joinToString { detection ->
+            "${YoloLedDetection.displayLabelForClass(detection.classId)} ${formatPercent(detection.objConf)}"
+        }
+
+    private fun formatPercent(value: Float): String =
+        String.format(Locale.US, "%.2f%%", value.coerceIn(0f, 1f) * 100f)
+
+    private fun retainReadAccess(uris: List<Uri>) {
+        uris.forEach { uri ->
+            runCatching {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+        }
+    }
+
+    private fun setControlsEnabled(enabled: Boolean) {
+        selectLedImagesButton.isEnabled = enabled
+        selectLedGroundTruthButton.isEnabled = enabled
+        inferLedButton.isEnabled = enabled
+        selectEmotionImagesButton.isEnabled = enabled
+        emotionGroundTruthSpinner.isEnabled = enabled
+        inferEmotionButton.isEnabled = enabled
+    }
+
+    private fun toast(message: Int) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     override fun onDestroy() {
@@ -443,11 +424,16 @@ class LocalInferenceActivity : AppCompatActivity() {
             synchronized(modelLock) {
                 yoloModel?.close()
                 yoloModel = null
-                pytorchClassifier?.close()
-                pytorchClassifier = null
+                emotionClassifier?.close()
+                emotionClassifier = null
             }
         }
         super.onDestroy()
     }
 
+    private companion object {
+        const val TAG = "StandaloneInference"
+        const val MAX_DECODED_IMAGE_EDGE = 2_048
+        const val EMOTION_SEQUENCE_LENGTH = 5
+    }
 }

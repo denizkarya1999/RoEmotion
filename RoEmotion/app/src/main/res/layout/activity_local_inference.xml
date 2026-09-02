@@ -3,7 +3,8 @@
     android:id="@+id/local_inference_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/darkBlue">
+    android:background="@color/darkBlue"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -11,103 +12,162 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- Header -->
         <include
             android:id="@+id/inference_fixed_header"
             layout="@layout/inference_header" />
 
-        <!-- ================= YOLO ================= -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/standalone_inference_description"
+            android:textColor="@android:color/white"
+            android:textSize="15sp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
-            android:text="LED Detection Dataset"
-            android:textColor="@android:color/white"
-            android:textSize="18sp"
+            android:text="@string/led_id_detection"
+            android:textColor="@color/yellow"
+            android:textSize="20sp"
             android:textStyle="bold" />
 
-        <LinearLayout
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal">
-
-            <EditText
-                android:id="@+id/yoloDatasetPathEditText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:hint="Select YOLO v26 Dataset"
-                android:focusable="false"
-                android:background="@android:color/white"
-                android:padding="12dp"
-                android:textColor="@android:color/black" />
-
-            <Button
-                android:id="@+id/selectYoloDatasetButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:text="Open"
-                android:backgroundTint="@color/yellow"
-                android:textColor="@color/darkBlue" />
-        </LinearLayout>
+            android:layout_marginTop="4dp"
+            android:text="@string/led_inference_description"
+            android:textColor="@android:color/white"
+            android:textSize="14sp" />
 
         <Button
-            android:id="@+id/inferYoloButton"
+            android:id="@+id/selectLedImagesButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Infer YOLO v26"
+            android:backgroundTint="@color/yellow"
+            android:text="@string/select_led_images"
+            android:textColor="@color/darkBlue" />
+
+        <TextView
+            android:id="@+id/ledSelectionTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@android:color/white"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/selectLedGroundTruthButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="@color/yellow"
+            android:text="@string/set_led_ground_truth"
+            android:textColor="@color/darkBlue" />
+
+        <TextView
+            android:id="@+id/ledGroundTruthTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@android:color/white"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/inferLedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:backgroundTint="@color/blue"
+            android:text="@string/run_led_inference"
             android:textColor="@android:color/white" />
 
-        <!-- ================= RESNET ================= -->
+        <TextView
+            android:id="@+id/ledResultsTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@android:color/white"
+            android:padding="12dp"
+            android:textColor="@android:color/black"
+            android:textIsSelectable="true"
+            android:textSize="14sp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
-            android:text="Emotion Detection Dataset"
-            android:textColor="@android:color/white"
-            android:textSize="18sp"
+            android:text="@string/emotion_recognition"
+            android:textColor="@color/yellow"
+            android:textSize="20sp"
             android:textStyle="bold" />
 
-        <LinearLayout
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal">
-
-            <EditText
-                android:id="@+id/resnetDatasetPathEditText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:hint="Select ResNet-50 Dataset"
-                android:focusable="false"
-                android:background="@android:color/white"
-                android:padding="12dp"
-                android:textColor="@android:color/black" />
-
-            <Button
-                android:id="@+id/selectResnetDatasetButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:text="Open"
-                android:backgroundTint="@color/yellow"
-                android:textColor="@color/darkBlue" />
-        </LinearLayout>
+            android:layout_marginTop="4dp"
+            android:text="@string/emotion_inference_description"
+            android:textColor="@android:color/white"
+            android:textSize="14sp" />
 
         <Button
-            android:id="@+id/inferResnetButton"
+            android:id="@+id/selectEmotionImagesButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
+            android:backgroundTint="@color/yellow"
+            android:text="@string/select_emotion_images"
+            android:textColor="@color/darkBlue" />
+
+        <TextView
+            android:id="@+id/emotionSelectionTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@android:color/white"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/emotion_ground_truth"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/emotionGroundTruthSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@android:color/white"
+            android:entries="@array/emotion_ground_truth_options"
+            android:paddingHorizontal="12dp"
+            android:spinnerMode="dialog" />
+
+        <Button
+            android:id="@+id/inferEmotionButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="@color/blue"
+            android:text="@string/run_emotion_inference"
+            android:textColor="@android:color/white" />
+
+        <TextView
+            android:id="@+id/emotionResultsTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:layout_marginBottom="24dp"
-            android:text="Infer ResNet-50"
-            android:backgroundTint="@color/blue"
-            android:textColor="@android:color/white" />
+            android:background="@android:color/white"
+            android:padding="12dp"
+            android:textColor="@android:color/black"
+            android:textIsSelectable="true"
+            android:textSize="14sp" />
 
     </LinearLayout>
 </ScrollView>

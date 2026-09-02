@@ -1,5 +1,6 @@
 package com.developer27.xemotion
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
@@ -7,9 +8,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.MultiSelectListPreference
+import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreference
+import com.developer27.xemotion.inference.LocalInferenceActivity
 import com.developer27.xemotion.ui.applySystemBarPadding
 import com.developer27.xemotion.ui.enableRoEmotionEdgeToEdge
 import com.developer27.xemotion.videoprocessing.Settings
@@ -206,6 +209,12 @@ class SettingsActivity : AppCompatActivity() {
                 true
             }
 
+            findPreference<Preference>(KEY_STANDALONE_INFERENCE)
+                ?.setOnPreferenceClickListener {
+                    startActivity(Intent(requireContext(), LocalInferenceActivity::class.java))
+                    true
+                }
+
             updateModeSpecificPreferences(Settings.OperatingMode.current)
         }
 
@@ -230,6 +239,10 @@ class SettingsActivity : AppCompatActivity() {
                 capabilities.inferenceSettingsEnabled
             findPreference<SwitchPreference>("enable_prediction_logging")?.isEnabled =
                 capabilities.inferenceSettingsEnabled
+        }
+
+        private companion object {
+            const val KEY_STANDALONE_INFERENCE = "standalone_inference"
         }
     }
 

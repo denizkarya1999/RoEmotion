@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="#00274C"
-    android:text="Dataset Inference"
+    android:text="@string/standalone_inference"
     android:textColor="@color/yellow"
     android:textSize="32sp"
     android:textStyle="bold"

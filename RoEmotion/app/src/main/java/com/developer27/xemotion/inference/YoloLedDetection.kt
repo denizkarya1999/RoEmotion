@@ -17,8 +17,8 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 // --------------------------------------------------
-// YOLO LED detection output format from Ultralytics TFLite:
-// [1, 300, 6]
+// YOLOv26n TFLite contract: float32 NCHW input [1, 3, 960, 960]
+// and end-to-end detection output [1, 300, 6].
 // --------------------------------------------------
 data class YoloDet(
     val xCenter: Float,
@@ -45,9 +45,15 @@ object YoloLedDetection {
 
     private const val EXPECTED_CLASSES = 3
 
-    // Maps class indices to User_1, User_2, User_3
-    private val classNumbers = IntArray(EXPECTED_CLASSES) { it + 1 }
-    val userLabels = Array(EXPECTED_CLASSES) { idx -> "User_${classNumbers[idx]}" }
+    // The model's OOK classes identify the three study participants.
+    val userLabels = Array(EXPECTED_CLASSES) { index -> "User_${index + 1}" }
+    val modelLabels = arrayOf("ook_10101", "ook_01110", "ook_00110")
+
+    fun displayLabelForClass(classId: Int): String {
+        val user = userLabels.getOrElse(classId) { "User_${classId + 1}" }
+        val ook = modelLabels.getOrNull(classId)
+        return if (ook == null) user else "$user ($ook)"
+    }
 
     // Safe sigmoid with clamping for numerical stability
     private fun sigmoid(x: Float): Float {
@@ -127,23 +133,19 @@ object YoloLedDetection {
         )
     }
 
-    // Converts bitmap to NHWC float tensor normalized to [0, 1]
-    fun bitmapToNormalizedTensorNHWC(bitmap: Bitmap): FloatArray {
+    /** Converts a bitmap to the channel-first float32 input used by YOLOv26n. */
+    fun bitmapToNormalizedTensorNCHW(bitmap: Bitmap): FloatArray {
         val width = bitmap.width
         val height = bitmap.height
-        val input = FloatArray(width * height * 3)
-        val pixels = IntArray(width * height)
+        val pixelCount = width * height
+        val input = FloatArray(pixelCount * 3)
+        val pixels = IntArray(pixelCount)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        var pixelIndex = 0
-        var inputIndex = 0
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                val px = pixels[pixelIndex++]
-                input[inputIndex++] = ((px shr 16) and 0xFF) / 255.0f
-                input[inputIndex++] = ((px shr 8) and 0xFF) / 255.0f
-                input[inputIndex++] = (px and 0xFF) / 255.0f
-            }
+        pixels.forEachIndexed { index, pixel ->
+            input[index] = ((pixel shr 16) and 0xFF) / 255.0f
+            input[pixelCount + index] = ((pixel shr 8) and 0xFF) / 255.0f
+            input[(2 * pixelCount) + index] = (pixel and 0xFF) / 255.0f
         }
         return input
     }

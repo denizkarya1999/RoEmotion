@@ -30,7 +30,6 @@ import com.developer27.xemotion.ar.ArModeManager
 import com.developer27.xemotion.camera.CameraHelper
 import com.developer27.xemotion.databinding.ActivityMainBinding
 import com.developer27.xemotion.inference.EmotionInference
-import com.developer27.xemotion.inference.LocalInferenceActivity
 import com.developer27.xemotion.storage.MediaStoreRepository
 import com.developer27.xemotion.storage.ookVideoFileName
 import com.developer27.xemotion.ui.applySystemBarMargins
@@ -245,11 +244,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Open local inference page
-        viewBinding.localInferenceButton.setOnClickListener {
-            startActivity(Intent(this, LocalInferenceActivity::class.java))
-        }
-
         // Enter or exit AR mode
         viewBinding.arModeButton.setOnClickListener {
             if (Settings.OperatingMode.current != Settings.OperatingMode.Mode.INFERENCE) return@setOnClickListener
@@ -308,7 +302,6 @@ class MainActivity : AppCompatActivity() {
         viewBinding.titleText.text = getString(R.string.app_name)
         listOf(
             viewBinding.arModeButton,
-            viewBinding.localInferenceButton,
             viewBinding.clearPredictionButton
         ).forEach { action ->
             action.isEnabled = inferenceActionsEnabled && auxiliaryControlsEnabled

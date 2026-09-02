@@ -159,4 +159,15 @@
             android:defaultValue="false" />
     </PreferenceCategory>
 
+    <PreferenceCategory
+        android:title="@string/standalone_inference"
+        android:layout="@layout/preference_category_layout">
+
+        <Preference
+            android:key="standalone_inference"
+            android:layout="@layout/preference_list_layout"
+            android:title="@string/standalone_inference"
+            android:summary="@string/standalone_inference_settings_summary" />
+    </PreferenceCategory>
+
 </PreferenceScreen>

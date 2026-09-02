@@ -81,7 +81,7 @@ class PyTorchModelLoader(context: Context) {
     }
 
     companion object {
-        const val YOLO_MODEL_ASSET = "RoEmotion_LED_Detection_float32.tflite"
+        const val YOLO_MODEL_ASSET = "RoEmotion_LED_Recognition_Model_YOLOv26n.tflite"
         const val EMOTION_MODEL_ASSET =
             "RoEmotion_Emotion_Detection_ResNet_50_LSTM_Attention.pt"
 
@@ -98,8 +98,10 @@ class YoloModelSession internal constructor(
     private val closed = AtomicBoolean(false)
     private val inputBuffers = compiledModel.createInputBuffers()
     private val outputBuffers = compiledModel.createOutputBuffers()
-    val inputShape: IntArray = intArrayOf(1, YOLO_INPUT_SIZE, YOLO_INPUT_SIZE, YOLO_CHANNELS)
+    val inputShape: IntArray = intArrayOf(1, YOLO_CHANNELS, YOLO_INPUT_SIZE, YOLO_INPUT_SIZE)
     val outputShape: IntArray = intArrayOf(1, YOLO_MAX_DETECTIONS, YOLO_VALUES_PER_DETECTION)
+    val inputWidth: Int = inputShape[3]
+    val inputHeight: Int = inputShape[2]
 
     init {
         require(inputBuffers.size == 1) { "Expected one YOLO input tensor." }
@@ -137,7 +139,7 @@ class YoloModelSession internal constructor(
     }
 
     private companion object {
-        const val YOLO_INPUT_SIZE = 640
+        const val YOLO_INPUT_SIZE = 960
         const val YOLO_CHANNELS = 3
         const val YOLO_MAX_DETECTIONS = 300
         const val YOLO_VALUES_PER_DETECTION = 6

@@ -21,6 +21,37 @@
         <item quantity="other">%d trace files saved</item>
     </plurals>
     <string name="switch_camera">Switch Camera</string>
-    <string name="local_inference">Dataset inference</string>
+    <string name="standalone_inference">Standalone Inference</string>
+    <string name="standalone_inference_settings_summary">Upload images, enter ground truth, and compare LED ID or emotion predictions</string>
+    <string name="standalone_inference_description">Select one or more images, provide the expected result, and run either bundled model entirely on this device.</string>
+    <string name="led_id_detection">LED ID Detection</string>
+    <string name="led_inference_description">The bundled YOLOv26n model evaluates each selected image independently. The selected ground-truth LED IDs apply to every image in this batch.</string>
+    <string name="select_led_images">Select LED image(s)</string>
+    <string name="set_led_ground_truth">Set ground truth LED ID(s)</string>
+    <string name="select_ground_truth_led_ids">Ground truth LED IDs</string>
+    <string name="no_led_ids">No LED IDs</string>
+    <string name="run_led_inference">Run LED ID detection</string>
+    <string name="emotion_recognition">Emotion Recognition</string>
+    <string name="emotion_inference_description">Selected images are used in selection order as one sequence. RoEmotion samples or repeats them to the model’s five-frame input.</string>
+    <string name="select_emotion_images">Select emotion image(s)</string>
+    <string name="emotion_ground_truth">Ground truth emotion</string>
+    <string name="run_emotion_inference">Run emotion recognition</string>
+    <string name="ground_truth_not_set">Ground truth not set</string>
+    <string name="inference_results_placeholder">Predicted results will appear here.</string>
+    <string name="no_images_selected">No images selected</string>
+    <string name="one_image_selected">1 image selected: %1$s</string>
+    <plurals name="images_selected">
+        <item quantity="one">%1$d image selected</item>
+        <item quantity="other">%1$d images selected</item>
+    </plurals>
+    <string name="select_led_images_first">Select at least one LED image first.</string>
+    <string name="select_led_ground_truth_first">Set the ground truth LED IDs first.</string>
+    <string name="select_emotion_images_first">Select at least one emotion image first.</string>
+    <string name="select_emotion_ground_truth_first">Select the ground truth emotion first.</string>
+    <string name="loading_led_model">Loading the LED ID model…</string>
+    <string name="loading_emotion_model">Loading the emotion recognition model…</string>
+    <string name="processing_images_progress">Processing image %1$d of %2$d…</string>
+    <string name="inference_failed_with_reason">Inference failed: %1$s</string>
+    <string name="unknown_error">Unknown error</string>
     <string name="university_logo_description">University of Michigan-Dearborn logo</string>
 </resources>

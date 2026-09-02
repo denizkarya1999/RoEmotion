@@ -185,18 +185,6 @@
             android:textColor="@android:color/white"
             android:textSize="24sp" />
 
-        <!-- Local Inference Button ("I") -->
-        <Button
-            android:id="@+id/localInferenceButton"
-            android:layout_width="60dp"
-            android:layout_height="60dp"
-            android:backgroundTint="@android:color/holo_blue_light"
-            android:elevation="2dp"
-            android:text="I"
-            android:contentDescription="@string/local_inference"
-            android:textColor="@android:color/white"
-            android:textSize="24sp" />
-
     </LinearLayout>
 
     <TextView
