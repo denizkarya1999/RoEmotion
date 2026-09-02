@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string-array name="led_id_options">
+    <string-array name="led_ground_truth_options">
+        <item>Select a User LED ID</item>
         <item>User 1 (OOK 10101)</item>
         <item>User 2 (OOK 01110)</item>
         <item>User 3 (OOK 00110)</item>

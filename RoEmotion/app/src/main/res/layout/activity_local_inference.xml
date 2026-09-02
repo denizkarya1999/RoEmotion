@@ -58,22 +58,24 @@
             android:textColor="@android:color/white"
             android:textSize="14sp" />
 
-        <Button
-            android:id="@+id/selectLedGroundTruthButton"
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:backgroundTint="@color/yellow"
-            android:text="@string/set_led_ground_truth"
-            android:textColor="@color/darkBlue" />
-
-        <TextView
-            android:id="@+id/ledGroundTruthTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:text="@string/led_ground_truth"
             android:textColor="@android:color/white"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/ledGroundTruthSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@android:color/white"
+            android:entries="@array/led_ground_truth_options"
+            android:paddingHorizontal="12dp"
+            android:spinnerMode="dialog" />
 
         <Button
             android:id="@+id/inferLedButton"

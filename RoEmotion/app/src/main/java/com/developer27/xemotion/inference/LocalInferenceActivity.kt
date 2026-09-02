@@ -1,6 +1,5 @@
 package com.developer27.xemotion.inference
 
-import android.app.AlertDialog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -36,8 +35,7 @@ class LocalInferenceActivity : AppCompatActivity() {
 
     private lateinit var selectLedImagesButton: Button
     private lateinit var ledSelectionTextView: TextView
-    private lateinit var selectLedGroundTruthButton: Button
-    private lateinit var ledGroundTruthTextView: TextView
+    private lateinit var ledGroundTruthSpinner: Spinner
     private lateinit var inferLedButton: Button
     private lateinit var ledResultsTextView: TextView
     private lateinit var selectEmotionImagesButton: Button
@@ -83,15 +81,14 @@ class LocalInferenceActivity : AppCompatActivity() {
 
         viewModel = ViewModelProvider(this)[StandaloneInferenceViewModel::class.java]
         bindViews()
-        setupControls()
         renderState()
+        setupControls()
     }
 
     private fun bindViews() {
         selectLedImagesButton = findViewById(R.id.selectLedImagesButton)
         ledSelectionTextView = findViewById(R.id.ledSelectionTextView)
-        selectLedGroundTruthButton = findViewById(R.id.selectLedGroundTruthButton)
-        ledGroundTruthTextView = findViewById(R.id.ledGroundTruthTextView)
+        ledGroundTruthSpinner = findViewById(R.id.ledGroundTruthSpinner)
         inferLedButton = findViewById(R.id.inferLedButton)
         ledResultsTextView = findViewById(R.id.ledResultsTextView)
         selectEmotionImagesButton = findViewById(R.id.selectEmotionImagesButton)
@@ -105,7 +102,22 @@ class LocalInferenceActivity : AppCompatActivity() {
         selectLedImagesButton.setOnClickListener {
             openLedImagesLauncher.launch(arrayOf("image/*"))
         }
-        selectLedGroundTruthButton.setOnClickListener(::showLedGroundTruthDialog)
+        ledGroundTruthSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selected = (position - 1)
+                    .takeIf { it in YoloLedDetection.userLabels.indices }
+                if (selected != viewModel.ledGroundTruthClassId) {
+                    viewModel.ledGroundTruthClassId = selected
+                    viewModel.ledResults = ""
+                    ledResultsTextView.text = getString(R.string.inference_results_placeholder)
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+                viewModel.ledGroundTruthClassId = null
+                viewModel.ledResults = ""
+            }
+        }
         inferLedButton.setOnClickListener { runLedInference() }
 
         selectEmotionImagesButton.setOnClickListener {
@@ -113,11 +125,17 @@ class LocalInferenceActivity : AppCompatActivity() {
         }
         emotionGroundTruthSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                viewModel.emotionGroundTruth = PyTorchClassifier.emotionLabels.getOrNull(position - 1)
+                val selected = PyTorchClassifier.emotionLabels.getOrNull(position - 1)
+                if (selected != viewModel.emotionGroundTruth) {
+                    viewModel.emotionGroundTruth = selected
+                    viewModel.emotionResults = ""
+                    emotionResultsTextView.text = getString(R.string.inference_results_placeholder)
+                }
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {
                 viewModel.emotionGroundTruth = null
+                viewModel.emotionResults = ""
             }
         }
         inferEmotionButton.setOnClickListener { runEmotionInference() }
@@ -125,12 +143,7 @@ class LocalInferenceActivity : AppCompatActivity() {
 
     private fun renderState() {
         ledSelectionTextView.text = selectionSummary(viewModel.ledImageUris)
-        ledGroundTruthTextView.text = when {
-            !viewModel.isLedGroundTruthConfigured -> getString(R.string.ground_truth_not_set)
-            viewModel.ledGroundTruthClassIds.isEmpty() -> getString(R.string.no_led_ids)
-            else -> viewModel.ledGroundTruthClassIds.sorted()
-                .joinToString { YoloLedDetection.displayLabelForClass(it) }
-        }
+        ledGroundTruthSpinner.setSelection(viewModel.ledGroundTruthClassId?.plus(1) ?: 0, false)
         ledResultsTextView.text = viewModel.ledResults.ifBlank {
             getString(R.string.inference_results_placeholder)
         }
@@ -148,37 +161,13 @@ class LocalInferenceActivity : AppCompatActivity() {
         }
     }
 
-    private fun showLedGroundTruthDialog(@Suppress("UNUSED_PARAMETER") ignored: View) {
-        val checked = BooleanArray(YoloLedDetection.userLabels.size) { index ->
-            index in viewModel.ledGroundTruthClassIds
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.select_ground_truth_led_ids)
-            .setMultiChoiceItems(R.array.led_id_options, checked) { _, which, isChecked ->
-                checked[which] = isChecked
-            }
-            .setNeutralButton(R.string.no_led_ids) { _, _ ->
-                viewModel.ledGroundTruthClassIds = emptySet()
-                viewModel.isLedGroundTruthConfigured = true
-                viewModel.ledResults = ""
-                renderState()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                viewModel.ledGroundTruthClassIds = checked.indices.filterTo(mutableSetOf()) { checked[it] }
-                viewModel.isLedGroundTruthConfigured = true
-                viewModel.ledResults = ""
-                renderState()
-            }
-            .show()
-    }
-
     private fun runLedInference() {
+        val groundTruth = viewModel.ledGroundTruthClassId
         if (viewModel.ledImageUris.isEmpty()) {
             toast(R.string.select_led_images_first)
             return
         }
-        if (!viewModel.isLedGroundTruthConfigured) {
+        if (groundTruth == null) {
             toast(R.string.select_led_ground_truth_first)
             return
         }
@@ -187,13 +176,12 @@ class LocalInferenceActivity : AppCompatActivity() {
         ledResultsTextView.text = getString(R.string.loading_led_model)
         activityScope.launch {
             try {
-                val groundTruth = viewModel.ledGroundTruthClassIds
                 val result = withContext(Dispatchers.IO) {
                     require(openCvReady) { getString(R.string.opencv_initialization_failed) }
                     val model = getOrCreateYoloModel()
                     buildString {
                         appendLine("LED ID Detection Results")
-                        appendLine("Ground truth for each image: ${formatLedClasses(groundTruth)}")
+                        appendLine("Ground truth for each image: ${YoloLedDetection.displayLabelForClass(groundTruth)}")
                         appendLine()
                         var exactMatches = 0
                         viewModel.ledImageUris.forEachIndexed { index, uri ->
@@ -211,16 +199,16 @@ class LocalInferenceActivity : AppCompatActivity() {
                             } finally {
                                 bitmap.recycle()
                             }
-                            val predicted = detections.map(YoloDet::classId).toSet()
-                            val exactMatch = groundTruth == predicted
-                            if (exactMatch) exactMatches++
+                            val predicted = detections.maxByOrNull(YoloDet::objConf)
+                            val match = predicted?.classId == groundTruth
+                            if (match) exactMatches++
                             appendLine(displayName(uri))
-                            appendLine("  Ground truth: ${formatLedClasses(groundTruth)}")
-                            appendLine("  Predicted: ${formatLedDetections(detections)}")
-                            appendLine("  Exact match: ${if (exactMatch) "Yes" else "No"}")
+                            appendLine("  Ground truth: ${YoloLedDetection.displayLabelForClass(groundTruth)}")
+                            appendLine("  Predicted: ${formatLedPrediction(predicted)}")
+                            appendLine("  Match: ${if (match) "Yes" else "No"}")
                             appendLine()
                         }
-                        appendLine("Exact matches: $exactMatches / ${viewModel.ledImageUris.size}")
+                        appendLine("Matches: $exactMatches / ${viewModel.ledImageUris.size}")
                     }
                 }
                 viewModel.ledResults = result.trimEnd()
@@ -381,15 +369,9 @@ class LocalInferenceActivity : AppCompatActivity() {
         return uri.lastPathSegment ?: uri.toString()
     }
 
-    private fun formatLedClasses(classIds: Set<Int>): String =
-        if (classIds.isEmpty()) getString(R.string.no_led_ids)
-        else classIds.sorted().joinToString { YoloLedDetection.displayLabelForClass(it) }
-
-    private fun formatLedDetections(detections: List<YoloDet>): String =
-        if (detections.isEmpty()) getString(R.string.no_led_ids)
-        else detections.sortedBy(YoloDet::classId).joinToString { detection ->
-            "${YoloLedDetection.displayLabelForClass(detection.classId)} ${formatPercent(detection.objConf)}"
-        }
+    private fun formatLedPrediction(detection: YoloDet?): String = detection?.let {
+        "${YoloLedDetection.displayLabelForClass(it.classId)} ${formatPercent(it.objConf)}"
+    } ?: getString(R.string.no_led_detected)
 
     private fun formatPercent(value: Float): String =
         String.format(Locale.US, "%.2f%%", value.coerceIn(0f, 1f) * 100f)
@@ -407,7 +389,7 @@ class LocalInferenceActivity : AppCompatActivity() {
 
     private fun setControlsEnabled(enabled: Boolean) {
         selectLedImagesButton.isEnabled = enabled
-        selectLedGroundTruthButton.isEnabled = enabled
+        ledGroundTruthSpinner.isEnabled = enabled
         inferLedButton.isEnabled = enabled
         selectEmotionImagesButton.isEnabled = enabled
         emotionGroundTruthSpinner.isEnabled = enabled

@@ -7,8 +7,7 @@ import androidx.lifecycle.ViewModel
 class StandaloneInferenceViewModel : ViewModel() {
     var ledImageUris: List<Uri> = emptyList()
     var emotionImageUris: List<Uri> = emptyList()
-    var ledGroundTruthClassIds: Set<Int> = emptySet()
-    var isLedGroundTruthConfigured: Boolean = false
+    var ledGroundTruthClassId: Int? = null
     var emotionGroundTruth: String? = null
     var ledResults: String = ""
     var emotionResults: String = ""
