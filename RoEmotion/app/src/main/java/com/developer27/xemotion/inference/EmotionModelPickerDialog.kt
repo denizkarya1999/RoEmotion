@@ -131,7 +131,7 @@ class EmotionModelPickerDialog : DialogFragment() {
         val alert = dialog as? AlertDialog ?: return
         alert.setTitle(title())
         alert.listView.apply {
-            adapter = ArrayAdapter(requireContext(), android.R.layout.simple_list_item_single_choice, choices())
+            adapter = ArrayAdapter(alert.context, android.R.layout.simple_list_item_single_choice, choices())
             choiceMode = ListView.CHOICE_MODE_SINGLE
             clearChoices()
             val checked = checkedChoice()

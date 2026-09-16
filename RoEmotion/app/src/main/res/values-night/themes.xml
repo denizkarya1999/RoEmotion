@@ -1,7 +1,70 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.Xemotion" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
+        <!-- Keep the yellow Options cards unchanged; apply dark surfaces to dialogs. -->
         <item name="colorPrimary">@color/darkBlue</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.RoEmotion.NightDialog</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.RoEmotion.NightDialog</item>
+        <!-- Preference input views are inflated with the activity context. -->
+        <item name="editTextStyle">@style/Widget.RoEmotion.NightDialog.EditText</item>
+    </style>
+
+    <style name="ThemeOverlay.RoEmotion.NightDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="android:windowBackground">@drawable/dialog_night_background</item>
+        <item name="android:colorBackground">@color/dialog_night_background</item>
+        <item name="colorBackgroundFloating">@color/dialog_night_background</item>
+        <item name="colorSurface">@color/dialog_night_background</item>
+        <item name="colorSurfaceContainerHigh">@color/dialog_night_background</item>
+        <item name="colorOnSurface">@color/dialog_night_text</item>
+        <item name="colorOnSurfaceVariant">@color/dialog_night_text</item>
+        <item name="colorPrimary">@color/dialog_night_text</item>
+        <item name="colorOnPrimary">@color/dialog_night_background</item>
+        <item name="colorSecondary">@color/dialog_night_text</item>
+        <item name="colorAccent">@color/dialog_night_text</item>
+        <item name="android:colorAccent">@color/dialog_night_text</item>
+        <item name="colorControlNormal">@color/dialog_night_text</item>
+        <item name="colorControlActivated">@color/dialog_night_text</item>
+        <item name="android:colorControlNormal">@color/dialog_night_text</item>
+        <item name="android:colorControlActivated">@color/dialog_night_text</item>
+        <item name="android:textColorPrimary">@color/dialog_night_text</item>
+        <item name="android:textColorSecondary">@color/dialog_night_text</item>
+        <item name="android:textColorHint">@color/dialog_night_hint</item>
+        <item name="android:textColorLink">@color/dialog_night_text</item>
+        <item name="android:textAppearanceListItem">@style/TextAppearance.RoEmotion.NightDialog.ListItem</item>
+        <item name="android:textAppearanceListItemSmall">@style/TextAppearance.RoEmotion.NightDialog.ListItem</item>
+        <item name="android:checkedTextViewStyle">@style/Widget.RoEmotion.NightDialog.CheckedTextView</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.RoEmotion.NightDialog.Button</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.RoEmotion.NightDialog.Button</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Widget.RoEmotion.NightDialog.Button</item>
+        <item name="materialAlertDialogTitleTextStyle">@style/Widget.RoEmotion.NightDialog.Title</item>
+        <item name="materialAlertDialogBodyTextStyle">@style/Widget.RoEmotion.NightDialog.Body</item>
+        <item name="editTextStyle">@style/Widget.RoEmotion.NightDialog.EditText</item>
+    </style>
+
+    <style name="TextAppearance.RoEmotion.NightDialog.ListItem" parent="TextAppearance.Material3.BodyLarge">
+        <item name="android:textColor">@color/dialog_night_text</item>
+    </style>
+
+    <style name="Widget.RoEmotion.NightDialog.CheckedTextView" parent="Widget.Material3.CheckedTextView">
+        <item name="android:textColor">@color/dialog_night_text</item>
+        <item name="android:checkMarkTint">@color/dialog_night_text</item>
+    </style>
+
+    <style name="Widget.RoEmotion.NightDialog.Button" parent="Widget.Material3.Button.TextButton.Dialog">
+        <item name="android:textColor">@color/dialog_night_text</item>
+    </style>
+
+    <style name="Widget.RoEmotion.NightDialog.Title" parent="MaterialAlertDialog.Material3.Title.Text">
+        <item name="android:textColor">@color/dialog_night_text</item>
+    </style>
+
+    <style name="Widget.RoEmotion.NightDialog.Body" parent="MaterialAlertDialog.Material3.Body.Text">
+        <item name="android:textColor">@color/dialog_night_text</item>
+    </style>
+
+    <style name="Widget.RoEmotion.NightDialog.EditText" parent="Widget.AppCompat.EditText">
+        <item name="android:textColor">@color/dialog_night_text</item>
+        <item name="android:textColorHint">@color/dialog_night_hint</item>
+        <item name="backgroundTint">@color/dialog_night_text</item>
     </style>
 </resources>

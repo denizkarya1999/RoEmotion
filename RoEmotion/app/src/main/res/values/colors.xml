@@ -8,4 +8,7 @@
     <color name="darkBlue">#00274C</color>
     <color name="orange">#ce370b</color>
     <color name="yellow">#FFCB05</color>
+    <color name="dialog_night_background">#132A40</color>
+    <color name="dialog_night_text">#B8DDFF</color>
+    <color name="dialog_night_hint">#91B8D9</color>
 </resources>

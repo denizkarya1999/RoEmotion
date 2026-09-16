@@ -1,50 +1,110 @@
 # RoEmotion
 
-RoEmotion is a privacy‐preserving, real‐time emotion‐recognition system that uses LED wristbands and a rolling‐shutter smartphone camera to detect and classify four core emotions—Anxiety, Excitement, Sadness, and Anger—without capturing identifiable facial or background information.
+RoEmotion is a privacy-preserving Android emotion-recognition system that uses
+LED wristbands and a rolling-shutter smartphone camera. It detects the light
+traces produced by each wristband and runs emotion classification locally on
+the device, without relying on identifiable facial imagery or cloud inference.
 
-## Key Components
+## RoEmotion 1.0
 
-- **LED Wristband**  
-  Low‐power wristbands emit On–Off Keying (OOK) signals at 6000 Hz, uniquely identifying each wearer and creating fine “streak” patterns when captured by a rolling‐shutter camera.
+Version 1.0 was released on **September 16th 2026**. The app includes thirteen
+offline emotion models: the previous ResNet-50 + LSTM + Attention model and
+twelve current models trained across two validation strategies, three neural
+network architectures, and two trace-processing variants.
 
-- **Xemotion App**  
-  An Android application that:
-  - Controls the phone’s rolling‐shutter rate (up to 6000 Hz) for Computer Vision mode  
-  - Switches to AR mode at 250 Hz for headset overlays (e.g., Google Cardboard)  
-  - Runs a YOLO‐based object detector to locate wristbands in each frame  
-  - Extracts smoothed wrist‐trace lines every 0.7 s  
-  - Classifies emotions with a ResNet‐50 neural network trained using a class‐balanced focal loss and OneCycleLR schedule  
+The first item on the **Options** screen is **Change Emotion Detection Model**.
+The selection hierarchy is:
 
-- **Modes of Operation**  
-  - **Computer Vision Mode:** User‐selectable shutter rate (5 Hz–6000 Hz); on‐screen emotion labels and controls  
-  - **Augmented Reality Mode:** Fixed 250 Hz shutter; floating emotion annotations overlaid on the real world  
+```text
+Change Emotion Detection Model
+├── Previous Models
+│   └── ResNet-50 + LSTM + Attention Model
+└── Current Models
+    ├── Trained with Random Distribution
+    │   ├── Standalone ResNet-50
+    │   ├── ResNet-50 + LSTM
+    │   └── ResNet-50 + LSTM + Attention
+    └── Trained with Different Person Validation
+        ├── Standalone ResNet-50
+        ├── ResNet-50 + LSTM
+        └── ResNet-50 + LSTM + Attention
+```
 
-## Highlights
+After choosing a current model, select either **Raw** or **Kalman Filter + CV**.
+The app remembers the completed selection, automatically uses the matching
+trace processing, and reloads inference without requiring a restart.
 
-- **Privacy First:** Only inertial and light‐based wrist data are collected—no video or audio of faces or surroundings.  
-- **High Accuracy:** Achieves up to 98.7 % accuracy on negative vs. positive classification and 95 % on fine‐grained emotions.  
-- **Low Latency:** Complete end‐to‐end inference (trace extraction, classification, overlay) runs in under 50 ms.  
-- **Cost‐Effective AR:** Supports inexpensive smartphone‐based headsets rather than proprietary AR devices.
+## Emotion Classification
 
-## Installation & Usage
+The current models classify nine emotions in this order:
 
-1. Clone this repository.  
-2. Build and install the **Xemotion** Android app on a rolling‐shutter–capable smartphone.  
-3. Pair each student’s wristband and select **Computer Vision** or **AR** mode.  
-4. Start a session; the app will display emotion labels or AR annotations in real time.  
+- Amusement
+- Anger
+- Anxiety
+- Disgust
+- Fear
+- Joy
+- Neutral
+- Sadness
+- Surprise
 
-## Experiment Results
+Standalone models classify a single frame. The LSTM models accept sequences of
+one to five real frames, with five frames collected during live inference. All
+current models use 224 × 224 RGB input, black letterboxing, and ImageNet
+normalization. The bundled model assets run through PyTorch 1.13.1 for Android.
 
-- **Video Stimuli:** Music videos (Guns N’ Roses, Alicia Keys, Destiny’s Child), horror clips (The Backrooms), action scenes, and more.  
-- **Lighting Conditions:** Artificial, natural + artificial, and dark rooms.  
-- **Metrics:** Binary and four‐way confusion matrices, F1‐score curves, t‐SNE feature clusters.  
+## App Features
 
-## Future Work
+- Fully offline model selection and inference
+- Rolling-shutter LED wristband detection and trace extraction
+- Computer Vision and Augmented Reality display modes
+- Model switching through the Options screen
+- Persistent model selection across app launches
+- Light and dark themes, including light-blue text on dark Options dialogs
+- Local per-user trace filtering for Kalman Filter + CV models
 
-- Retrain YOLO detector on 6000 Hz wristband signals for improved robustness.  
-- Expand ResNet‐50 training set with more “Sadness” and “Anger” examples.  
-- Add battery‐powered on/off switch and direct battery‐to‐Arduino charging.  
+## Installation
+
+The release APK is named **Install RoEmotion 1.0.apk**. It is approximately
+1.70 GB because all thirteen model variants are bundled for offline use.
+
+To build the app from source:
+
+```sh
+cd RoEmotion
+./gradlew assembleRelease
+```
+
+The project targets Android SDK 36 and supports Android 8.0 (API 26) or newer.
+The release APK retains the project's existing signing configuration so it can
+update compatible local installations.
+
+## Verification
+
+RoEmotion 1.0 passed:
+
+- 42 JVM unit tests
+- Android lint with no errors
+- Debug, device-test, and release builds
+- 11 instrumentation tests on a physical Google Pixel 8a running Android 17
+- All thirteen model input/output contract checks
+- Exact source-to-export prediction parity across 44 test cases
+- PyTorch 1.13.1 runtime compatibility checks across 32 test cases
+- SHA-256 verification for every packaged current-model asset
+- APK signature verification
+
+See the [release notes](RoEmotion/docs/releases/2026-09-16.md) for the complete
+model behavior and test record. Model provenance, conversion, and reproduction
+instructions are documented in [RoEmotion/scripts/README.md](RoEmotion/scripts/README.md).
+
+## Developers
+
+- Deniz Acikbas
+- Hasky Fynn
+- Thuy-Anh Nguyen
+- Amina Bilal
+- Christian Nwobu
 
 ---
 
-© 2025 Trustworthy-AI Lab at The University of Michigan-Dearborn
+© 2026 Trustworthy AI Lab at the University of Michigan-Dearborn

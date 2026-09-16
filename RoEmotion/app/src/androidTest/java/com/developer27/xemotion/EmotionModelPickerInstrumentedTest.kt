@@ -1,6 +1,20 @@
 package com.developer27.xemotion
 
+import android.app.Activity
+import android.app.Application
 import android.content.SharedPreferences
+import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.os.Build
+import android.os.Bundle
+import android.view.WindowManager
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.DialogFragment
+import androidx.lifecycle.Lifecycle
 import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceManager
@@ -23,6 +37,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /** Exercises the real Options screen without initializing camera or model runtimes. */
 @RunWith(AndroidJUnit4::class)
@@ -30,10 +45,41 @@ class EmotionModelPickerInstrumentedTest {
     private lateinit var preferences: SharedPreferences
     private var originalPreferences = emptyMap<String, Any?>()
     private var scenario: ActivityScenario<SettingsActivity>? = null
+    private var originalNightMode = AppCompatDelegate.MODE_NIGHT_UNSPECIFIED
+    private var testApplication: Application? = null
+    private val visibleTestActivity = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+            if (activity !is SettingsActivity) return
+            // Keep this test's own window visible without dismissing the device's lock screen.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                activity.setShowWhenLocked(true)
+                activity.setTurnScreenOn(true)
+            } else {
+                @Suppress("DEPRECATION")
+                activity.window.addFlags(
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                )
+            }
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+
+        override fun onActivityStarted(activity: Activity) = Unit
+        override fun onActivityResumed(activity: Activity) = Unit
+        override fun onActivityPaused(activity: Activity) = Unit
+        override fun onActivityStopped(activity: Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+        override fun onActivityDestroyed(activity: Activity) = Unit
+    }
 
     @Before
     fun openOptionsWithOriginalModel() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
+        testApplication = context.applicationContext as Application
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            testApplication?.registerActivityLifecycleCallbacks(visibleTestActivity)
+        }
+        originalNightMode = AppCompatDelegate.getDefaultNightMode()
         preferences = PreferenceManager.getDefaultSharedPreferences(context)
         originalPreferences = preferences.all.mapValues { (_, value) ->
             if (value is Set<*>) value.toSet() else value
@@ -43,8 +89,7 @@ class EmotionModelPickerInstrumentedTest {
                 .putString(Settings.KEY_OPERATING_MODE, Settings.OperatingMode.Mode.INFERENCE.name)
                 .commit()
         )
-        scenario = ActivityScenario.launch(SettingsActivity::class.java)
-        onView(withText(R.string.change_emotion_detection_model)).check(matches(isDisplayed()))
+        launchOptions()
     }
 
     @After
@@ -52,6 +97,10 @@ class EmotionModelPickerInstrumentedTest {
         try {
             scenario?.close()
         } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                testApplication?.unregisterActivityLifecycleCallbacks(visibleTestActivity)
+            }
+            testApplication = null
             if (::preferences.isInitialized) {
                 val editor = preferences.edit().clear()
                 originalPreferences.forEach { (key, value) ->
@@ -69,6 +118,7 @@ class EmotionModelPickerInstrumentedTest {
                 assertTrue(editor.commit())
                 InstrumentationRegistry.getInstrumentation().runOnMainSync {
                     Settings.load(preferences)
+                    AppCompatDelegate.setDefaultNightMode(originalNightMode)
                 }
             }
         }
@@ -147,6 +197,104 @@ class EmotionModelPickerInstrumentedTest {
         assertEquals(before, preferences.all)
         assertSelection(EmotionModelCatalog.legacy)
         assertEquals(Settings.Trace.Type.RAW, Settings.Trace.inferenceType)
+    }
+
+    @Test
+    fun darkDialogsUseReadableColorsAndDayDialogsKeepTheirAppearance() {
+        relaunchWithNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+        openPicker()
+        captureDialog("dialog-dark.png", dark = true)
+        onView(withId(android.R.id.button2)).inRoot(isDialog()).perform(click())
+
+        // App Mode uses AndroidX's standard preference dialog, not the model picker.
+        requireNotNull(scenario).onActivity { activity ->
+            val fragment = activity.supportFragmentManager
+                .findFragmentById(R.id.settings_container) as SettingsActivity.SettingsFragment
+            fragment.onDisplayPreferenceDialog(
+                requireNotNull(fragment.findPreference<ListPreference>(Settings.KEY_OPERATING_MODE))
+            )
+        }
+        onView(withText("App Mode")).inRoot(isDialog()).check(matches(isDisplayed()))
+        captureDialog("preference-dialog-dark.png", dark = true)
+        onView(withId(android.R.id.button2)).inRoot(isDialog()).perform(click())
+
+        // Numeric preferences inflate their EditText using the activity theme.
+        requireNotNull(scenario).onActivity { activity ->
+            val fragment = activity.supportFragmentManager
+                .findFragmentById(R.id.settings_container) as SettingsActivity.SettingsFragment
+            fragment.onDisplayPreferenceDialog(
+                requireNotNull(fragment.findPreference<Preference>("iso_value"))
+            )
+        }
+        onView(withText("Set ISO")).inRoot(isDialog()).check(matches(isDisplayed()))
+        requireNotNull(scenario).onActivity { activity ->
+            val dialog = activeDialog(activity)
+            val editor = requireNotNull(dialog.findViewById<TextView>(android.R.id.edit))
+            assertEquals(ContextCompat.getColor(activity, R.color.dialog_night_text), editor.currentTextColor)
+        }
+        onView(withId(android.R.id.button2)).inRoot(isDialog()).perform(click())
+
+        relaunchWithNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+        openPicker()
+        captureDialog("dialog-light.png", dark = false)
+    }
+
+    private fun relaunchWithNightMode(mode: Int) {
+        scenario?.close()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            AppCompatDelegate.setDefaultNightMode(mode)
+        }
+        launchOptions()
+    }
+
+    private fun launchOptions() {
+        scenario = ActivityScenario.launch(SettingsActivity::class.java)
+            .moveToState(Lifecycle.State.RESUMED)
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        onView(withText(R.string.change_emotion_detection_model)).check(matches(isDisplayed()))
+    }
+
+    private fun activeDialog(activity: SettingsActivity): AlertDialog =
+        requireNotNull(
+            activity.supportFragmentManager.fragments.filterIsInstance<DialogFragment>()
+                .lastOrNull { it.dialog?.isShowing == true }?.dialog as? AlertDialog
+        )
+
+    private fun captureDialog(name: String, dark: Boolean) {
+        requireNotNull(scenario).onActivity { activity ->
+            val actualNight = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            assertEquals(if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO, actualNight)
+            val dialog = activeDialog(activity)
+            val decor = requireNotNull(dialog.window).decorView
+            assertTrue("Dialog has not been laid out", decor.width > 0 && decor.height > 0)
+            val bitmap = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
+            try {
+                decor.draw(Canvas(bitmap))
+                val directory = requireNotNull(activity.getExternalFilesDir("qa"))
+                assertTrue(directory.isDirectory || directory.mkdirs())
+                File(directory, name).outputStream().use { output ->
+                    assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                }
+                if (dark) {
+                    val textColor = ContextCompat.getColor(activity, R.color.dialog_night_text)
+                    val background = ContextCompat.getColor(activity, R.color.dialog_night_background)
+                    assertEquals(textColor, requireNotNull(dialog.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)).currentTextColor)
+                    assertEquals(textColor, (dialog.listView.getChildAt(0) as TextView).currentTextColor)
+                    assertEquals(textColor, dialog.getButton(AlertDialog.BUTTON_NEGATIVE).currentTextColor)
+                    var darkSamples = 0
+                    var samples = 0
+                    for (x in 0 until bitmap.width step 8) {
+                        for (y in 0 until bitmap.height step 8) {
+                            samples++
+                            if (bitmap.getPixel(x, y) == background) darkSamples++
+                        }
+                    }
+                    assertTrue("Dialog surface must use the dark background", darkSamples > samples / 3)
+                }
+            } finally {
+                bitmap.recycle()
+            }
+        }
     }
 
     private fun openPicker() {
