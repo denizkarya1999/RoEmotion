@@ -42,7 +42,7 @@ android {
         applicationId = "com.developer27.xemotion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = 2
         versionName = "1.0"
 
         ndk {
@@ -81,7 +81,7 @@ android {
         }
     }
     androidResources {
-        noCompress += listOf("tflite")
+        noCompress += listOf("tflite", "pt")
     }
 }
 

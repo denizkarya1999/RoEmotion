@@ -2,6 +2,7 @@ package com.developer27.xemotion.inference
 
 import android.content.Context
 import android.util.Log
+import androidx.preference.PreferenceManager
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.CompiledModel
 import org.pytorch.Module
@@ -13,11 +14,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Owns loading of all bundled inference models. Call its methods from a worker thread. */
 class PyTorchModelLoader(context: Context) {
     private val appContext = context.applicationContext
+    private val assetRevision by lazy {
+        @Suppress("DEPRECATION")
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).lastUpdateTime.toString()
+    }
 
-    fun loadModels(): LoadedInferenceModels {
+    fun selectedModel(): EmotionModelSpec = EmotionModelCatalog.selected(
+        PreferenceManager.getDefaultSharedPreferences(appContext)
+    )
+
+    fun loadModels(spec: EmotionModelSpec = selectedModel()): LoadedInferenceModels {
         val yoloModel = loadYoloModel()
         return try {
-            LoadedInferenceModels(yoloModel, loadEmotionClassifier())
+            LoadedInferenceModels(yoloModel, loadEmotionClassifier(spec))
         } catch (error: Throwable) {
             yoloModel.close()
             throw error
@@ -29,9 +38,9 @@ class PyTorchModelLoader(context: Context) {
             ?: checkNotNull(createYoloModel(CompiledModel.Options.CPU, "CPU"))
     }
 
-    fun loadEmotionClassifier(): PyTorchClassifier {
-        val modelFile = copyAssetToInternalStorage(EMOTION_MODEL_ASSET)
-        return PyTorchClassifier(Module.load(modelFile.absolutePath))
+    fun loadEmotionClassifier(spec: EmotionModelSpec = selectedModel()): PyTorchClassifier {
+        val modelFile = copyAssetToInternalStorage(spec.assetName)
+        return PyTorchClassifier(Module.load(modelFile.absolutePath), spec)
     }
 
     private fun createYoloModel(
@@ -57,14 +66,21 @@ class PyTorchModelLoader(context: Context) {
     }
 
     private fun copyAssetToInternalStorageLocked(assetName: String): File {
-        val output = File(appContext.filesDir, assetName)
+        // Bundled model copies are reproducible and must not fill Android cloud backups.
+        val directory = File(appContext.noBackupFilesDir, "emotion_models")
+        check(directory.isDirectory || directory.mkdirs()) { "Could not create the model cache." }
+        val output = File(directory, assetName)
+        val revision = File(directory, "$assetName.revision")
         val expectedSize = runCatching { appContext.assets.openFd(assetName).declaredLength }
             .getOrNull()
-        if (output.isFile && output.length() > 0L && (expectedSize == null || output.length() == expectedSize)) {
+        if (output.isFile && output.length() > 0L &&
+            (expectedSize == null || output.length() == expectedSize) &&
+            revision.isFile && revision.readText() == assetRevision
+        ) {
             return output
         }
 
-        val temporary = File(appContext.filesDir, "$assetName.tmp")
+        val temporary = File(directory, "$assetName.tmp")
         appContext.assets.open(assetName).use { input ->
             FileOutputStream(temporary, false).use { fileOutput ->
                 input.copyTo(fileOutput, COPY_BUFFER_SIZE)
@@ -77,6 +93,7 @@ class PyTorchModelLoader(context: Context) {
             error("Could not replace cached model: ${output.absolutePath}")
         }
         check(temporary.renameTo(output)) { "Could not finalize cached model: $assetName" }
+        revision.writeText(assetRevision)
         return output
     }
 

@@ -12,6 +12,8 @@ import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreference
+import com.developer27.xemotion.inference.EmotionModelCatalog
+import com.developer27.xemotion.inference.EmotionModelPickerDialog
 import com.developer27.xemotion.inference.LocalInferenceActivity
 import com.developer27.xemotion.ui.applySystemBarPadding
 import com.developer27.xemotion.ui.enableRoEmotionEdgeToEdge
@@ -32,10 +34,12 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.settings_root).applySystemBarPadding()
 
         // Attach SettingsFragment to display preference UI inside the container
-        supportFragmentManager
-            .beginTransaction()
-            .replace(R.id.settings_container, SettingsFragment())
-            .commit()
+        if (savedInstanceState == null) {
+            supportFragmentManager
+                .beginTransaction()
+                .replace(R.id.settings_container, SettingsFragment())
+                .commit()
+        }
     }
 
     // Fragment that manages all preference settings
@@ -44,6 +48,18 @@ class SettingsActivity : AppCompatActivity() {
             // Load preferences from the XML resource.
             setPreferencesFromResource(R.xml.root_preferences, rootKey)
             preferenceManager.sharedPreferences?.let(Settings::load)
+
+            parentFragmentManager.setFragmentResultListener(
+                EmotionModelPickerDialog.RESULT_KEY,
+                this
+            ) { _, _ -> updateModeSpecificPreferences(Settings.OperatingMode.current) }
+            findPreference<Preference>(EmotionModelCatalog.KEY_SELECTION)
+                ?.setOnPreferenceClickListener {
+                    if (parentFragmentManager.findFragmentByTag(EmotionModelPickerDialog.TAG) == null) {
+                        EmotionModelPickerDialog().show(parentFragmentManager, EmotionModelPickerDialog.TAG)
+                    }
+                    true
+                }
 
             val operatingModePref = findPreference<ListPreference>(Settings.KEY_OPERATING_MODE)
             operatingModePref?.setOnPreferenceChangeListener { _, newValue ->
@@ -227,12 +243,21 @@ class SettingsActivity : AppCompatActivity() {
 
         private fun updateModeSpecificPreferences(mode: Settings.OperatingMode.Mode) {
             val capabilities = Settings.capabilitiesFor(mode)
+            val model = preferenceManager.sharedPreferences?.let(EmotionModelCatalog::selected)
+                ?: EmotionModelCatalog.legacy
+            findPreference<Preference>(EmotionModelCatalog.KEY_SELECTION)?.summary =
+                model.selectionSummary
             findPreference<ListPreference>(Settings.KEY_DATA_COLLECTION_TYPE)?.isEnabled =
                 capabilities.dataCollectionTypeSettingsEnabled
             findPreference<MultiSelectListPreference>(Settings.KEY_TRACE_TYPES)?.isEnabled =
                 capabilities.traceCollectionSettingsEnabled
-            findPreference<ListPreference>(Settings.KEY_INFERENCE_TRACE_TYPE)?.isEnabled =
-                capabilities.inferenceTraceSettingsEnabled
+            findPreference<ListPreference>(Settings.KEY_INFERENCE_TRACE_TYPE)?.apply {
+                isEnabled = capabilities.inferenceTraceSettingsEnabled && model.isLegacy
+                model.requiredTraceType?.let { value = it.name }
+                summary = model.traceVariant?.let {
+                    getString(R.string.emotion_model_trace_locked, it.displayName)
+                } ?: "%s"
+            }
             findPreference<SeekBarPreference>(Settings.KEY_INFERENCE_LABEL_SIZE)?.isEnabled =
                 capabilities.inferenceSettingsEnabled
             findPreference<ListPreference>("max_boxes")?.isEnabled =

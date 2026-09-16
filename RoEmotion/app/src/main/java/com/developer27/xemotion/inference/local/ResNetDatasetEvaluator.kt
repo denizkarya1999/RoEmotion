@@ -2,14 +2,27 @@ package com.developer27.xemotion.inference.local
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import com.developer27.xemotion.inference.PyTorchClassifier
+import com.developer27.xemotion.inference.sampleEmotionSequence
 import java.io.File
 import java.util.Locale
 
 /** Evaluates sequence classifications independently from Android UI and model loading. */
 class ResNetDatasetEvaluator(
     private val parser: ResNetDatasetParser,
-    private val sequenceLength: Int = 5
+    private val sequenceLength: Int = 5,
+    private val emotionLabels: List<String> = emptyList(),
+    private val modelName: String? = null,
+    private val padShortSequence: Boolean = true
 ) {
+    constructor(parser: ResNetDatasetParser, classifier: PyTorchClassifier) : this(
+        parser,
+        classifier.modelSpec.sequenceLength,
+        classifier.labels,
+        classifier.modelSpec.selectionSummary.replace("\n", " / "),
+        classifier.modelSpec.isLegacy
+    )
+
     init {
         require(sequenceLength > 0) { "Sequence length must be positive." }
     }
@@ -32,6 +45,7 @@ class ResNetDatasetEvaluator(
 
         return buildString {
             appendLine("RoEmotion - ResNet Dataset Inference Report")
+            modelName?.let { appendLine("Model: $it") }
             appendLine("Selected Input: $inputDescription")
             appendLine("Detected Dataset Root: ${root.absolutePath}")
             appendLine("Detected Classes: ${classNames.joinToString()}")
@@ -48,7 +62,7 @@ class ResNetDatasetEvaluator(
 
                 try {
                     evaluatedSequences++
-                    val prepared = adjustSequenceLength(loaded)
+                    val prepared = sampleEmotionSequence(loaded, sequenceLength, padShortSequence)
                     val (predictedLabel, probabilities) = predictor(prepared)
                     val success = normalize(sequence.groundTruthLabel) == normalize(predictedLabel)
                     classIndices[sequence.groundTruthLabel]?.let { classIndex ->
@@ -96,15 +110,6 @@ class ResNetDatasetEvaluator(
         }
     }
 
-    private fun adjustSequenceLength(frames: List<Bitmap>): List<Bitmap> = when {
-        frames.size == sequenceLength -> frames
-        frames.size > sequenceLength && sequenceLength == 1 -> listOf(frames.first())
-        frames.size > sequenceLength -> List(sequenceLength) { index ->
-            frames[(index * (frames.lastIndex).toDouble() / (sequenceLength - 1)).toInt()]
-        }
-        else -> frames + List(sequenceLength - frames.size) { frames.last() }
-    }
-
     private fun normalize(label: String): String = label.trim()
         .lowercase(Locale.US)
         .replace("-", " ")
@@ -112,7 +117,10 @@ class ResNetDatasetEvaluator(
         .replace(Regex("""\s+"""), " ")
 
     private fun formatProbabilities(probabilities: FloatArray): String =
-        probabilities.joinToString { String.format(Locale.US, "%.4f", it) }
+        probabilities.mapIndexed { index, probability ->
+            val value = String.format(Locale.US, "%.4f", probability)
+            emotionLabels.getOrNull(index)?.let { "$it: $value" } ?: value
+        }.joinToString()
 
     private fun percentage(numerator: Int, denominator: Int): String =
         String.format(

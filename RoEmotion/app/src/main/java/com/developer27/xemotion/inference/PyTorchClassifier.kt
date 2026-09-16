@@ -1,6 +1,9 @@
 package com.developer27.xemotion.inference
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.util.Log
 import org.pytorch.IValue
 import org.pytorch.Module
@@ -11,16 +14,25 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Runs emotion classification for a prepared sequence of trace images. */
 class PyTorchClassifier internal constructor(
     private val module: Module,
+    val modelSpec: EmotionModelSpec = EmotionModelCatalog.legacy,
     private val inputWidth: Int = 224,
     private val inputHeight: Int = 224,
     private val mean: FloatArray = floatArrayOf(0.485f, 0.456f, 0.406f),
     private val std: FloatArray = floatArrayOf(0.229f, 0.224f, 0.225f)
 ) : Closeable {
     private val closed = AtomicBoolean(false)
+    val labels: List<String> get() = modelSpec.labels
 
     fun classifySequence(frames: List<Bitmap>): Pair<String, FloatArray> {
         check(!closed.get()) { "The emotion classifier is closed." }
-        require(frames.isNotEmpty()) { "At least one frame is required for classification." }
+        val allowedFrames = if (modelSpec.isLegacy) {
+            modelSpec.sequenceLength..modelSpec.sequenceLength
+        } else {
+            1..modelSpec.sequenceLength
+        }
+        require(frames.size in allowedFrames) {
+            "${modelSpec.displayName} requires ${allowedFrames.first}–${allowedFrames.last} frame(s)."
+        }
 
         val valuesPerFrame = 3 * inputHeight * inputWidth
         val sequenceValues = FloatArray(valuesPerFrame * frames.size)
@@ -32,23 +44,29 @@ class PyTorchClassifier internal constructor(
             if (processed !== bitmap) processed.recycle()
         }
 
-        val sequenceTensor = Tensor.fromBlob(
-            sequenceValues,
+        val shape = if (!modelSpec.isLegacy && modelSpec.sequenceLength == 1) {
+            longArrayOf(1, 3, inputHeight.toLong(), inputWidth.toLong())
+        } else {
             longArrayOf(1, frames.size.toLong(), 3, inputHeight.toLong(), inputWidth.toLong())
-        )
+        }
+        val sequenceTensor = Tensor.fromBlob(sequenceValues, shape)
         val logits = module.forward(IValue.from(sequenceTensor)).toTensor().dataAsFloatArray
+        check(logits.size == labels.size && logits.all(Float::isFinite)) {
+            "Invalid output from ${modelSpec.displayName}: expected ${labels.size} finite scores."
+        }
         val probabilities = softmax(logits)
         val bestIndex = probabilities.indices.maxByOrNull(probabilities::get) ?: 0
-        return emotionLabels.getOrElse(bestIndex) { "Unknown" } to probabilities
+        return labels[bestIndex] to probabilities
     }
 
     fun logProbabilities(probabilities: FloatArray) {
         probabilities.forEachIndexed { index, probability ->
-            Log.d(TAG, "${emotionLabels.getOrNull(index) ?: "Label$index"}: $probability")
+            Log.d(TAG, "${labels.getOrNull(index) ?: "Label$index"}: $probability")
         }
     }
 
     private fun preprocess(bitmap: Bitmap): Bitmap {
+        if (!modelSpec.isLegacy) return letterbox(bitmap, inputWidth, inputHeight)
         val resized = resizeShortSide(bitmap, RESIZE_SHORT_SIDE)
         val cropped = centerCrop(resized, inputWidth, inputHeight)
         if (resized !== bitmap && resized !== cropped) resized.recycle()
@@ -103,7 +121,26 @@ class PyTorchClassifier internal constructor(
     }
 
     companion object {
-        val emotionLabels = listOf("Angry", "Anxiety", "Disgust", "Excitement", "Sadness")
+        // Kept for callers that explicitly need the previous model's five-label vocabulary.
+        val emotionLabels: List<String> get() = EmotionModelCatalog.legacy.labels
+
+        /** Matches current-model training: fit the whole RGB image on a black square. */
+        internal fun letterbox(bitmap: Bitmap, width: Int, height: Int): Bitmap {
+            require(bitmap.width > 0 && bitmap.height > 0)
+            val scale = minOf(width.toDouble() / bitmap.width, height.toDouble() / bitmap.height)
+            // Math.rint uses the same ties-to-even rule as Pillow's round().
+            val fittedWidth = Math.rint(bitmap.width * scale).toInt().coerceIn(1, width)
+            val fittedHeight = Math.rint(bitmap.height * scale).toInt().coerceIn(1, height)
+            val resized = Bitmap.createScaledBitmap(bitmap, fittedWidth, fittedHeight, true)
+            val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(output)
+            canvas.drawColor(Color.BLACK)
+            val left = Math.rint((width - fittedWidth) / 2.0).toFloat()
+            val top = Math.rint((height - fittedHeight) / 2.0).toFloat()
+            canvas.drawBitmap(resized, left, top, Paint(Paint.FILTER_BITMAP_FLAG))
+            if (resized !== bitmap) resized.recycle()
+            return output
+        }
 
         private const val TAG = "PyTorchClassifier"
         private const val RESIZE_SHORT_SIDE = 256

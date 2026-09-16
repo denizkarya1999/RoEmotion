@@ -27,6 +27,7 @@ object KalmanBank {
     }
 
     /** Reset all filters (call from VideoProcessor.reset()) */
+    @Synchronized
     fun initKalmanFilter() {
         for (i in filters.indices) filters[i] = null
     }
@@ -35,6 +36,7 @@ object KalmanBank {
      * Correct position for a given classId (0,1,2).
      * If you don’t care about class, just pass 0.
      */
+    @Synchronized
     fun applyKalmanFilter(point: Point, classId: Int = 0): Pair<Double, Double> {
         val id = classId.coerceIn(0, filters.lastIndex)
         val kf = filters[id] ?: newKF().also { filters[id] = it }
@@ -43,27 +45,33 @@ object KalmanBank {
             put(0, 0, point.x)
             put(1, 0, point.y)
         }
-        kf.predict()
-        val corrected = kf.correct(measurement)
-
-        val fx = corrected[0, 0][0]
-        val fy = corrected[1, 0][0]
-        return fx to fy
+        return try {
+            kf.predict().release()
+            val corrected = kf.correct(measurement)
+            try {
+                corrected[0, 0][0] to corrected[1, 0][0]
+            } finally {
+                corrected.release()
+            }
+        } finally {
+            measurement.release()
+        }
     }
 
+    @Synchronized
     fun reset() {
         for (i in filters.indices) filters[i] = null
     }
 
+    /** Starts fresh motion history for one tracked user without disturbing the others. */
+    @Synchronized
+    fun reset(classId: Int) {
+        if (classId in filters.indices) filters[classId] = null
+    }
+
     /** Per-class correction; use classId in [0,2]. */
     fun correct(classId: Int, p: Point): Point {
-        val id = classId.coerceIn(0, 2)
-        val kf = filters[id] ?: newKF().also { filters[id] = it }
-        val z = Mat(2, 1, CvType.CV_32F).apply {
-            put(0, 0, p.x); put(1, 0, p.y)
-        }
-        kf.predict()
-        val corr = kf.correct(z)
-        return Point(corr[0,0][0], corr[1,0][0])
+        val (x, y) = applyKalmanFilter(p, classId)
+        return Point(x, y)
     }
 }

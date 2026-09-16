@@ -26,7 +26,7 @@ class AboutXemotionActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
-        // When the UM logo is clicked 5 times, show a toast.
+        // Open the university website when its logo is clicked.
         binding.umLogo.setOnClickListener {
             val url = "https://umich.edu/"
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))

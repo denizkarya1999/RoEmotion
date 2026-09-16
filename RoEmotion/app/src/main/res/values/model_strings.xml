@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="change_emotion_detection_model">Change Emotion Detection Model</string>
+    <string name="emotion_previous_models">Previous Models</string>
+    <string name="emotion_current_models">Current Models</string>
+    <string name="emotion_model_back">Back</string>
+    <string name="emotion_model_trace_title">%1$s — Trace Type</string>
+    <string name="emotion_model_selected">Selected: %1$s</string>
+    <string name="emotion_model_trace_locked">%1$s — required by the selected model. Use Change Emotion Detection Model to choose another trace type.</string>
+</resources>

@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.developer27.xemotion.inference.PyTorchModelLoader
+import com.developer27.xemotion.inference.EmotionModelCatalog
 import com.developer27.xemotion.videoprocessing.Settings
 import com.developer27.xemotion.videoprocessing.VideoProcessor
 import org.junit.Assert.assertEquals
@@ -43,13 +44,13 @@ class ExampleInstrumentedTest {
             matrix.release()
         }
 
-        PyTorchModelLoader(appContext).loadEmotionClassifier().close()
+        PyTorchModelLoader(appContext).loadEmotionClassifier(EmotionModelCatalog.legacy).close()
     }
 
     @Test
     fun emotionClassifierProducesPredictionForFiveFrameSequence() {
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        val classifier = PyTorchModelLoader(appContext).loadEmotionClassifier()
+        val classifier = PyTorchModelLoader(appContext).loadEmotionClassifier(EmotionModelCatalog.legacy)
         val frames = List(5) { Bitmap.createBitmap(224, 224, Bitmap.Config.ARGB_8888) }
 
         try {

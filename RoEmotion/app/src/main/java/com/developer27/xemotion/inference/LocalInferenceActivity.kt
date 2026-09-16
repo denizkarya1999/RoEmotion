@@ -9,6 +9,7 @@ import android.util.Log
 import android.view.View
 import android.view.WindowManager
 import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.Spinner
 import android.widget.TextView
@@ -50,6 +51,7 @@ class LocalInferenceActivity : AppCompatActivity() {
     private val modelLock = Any()
     private var yoloModel: YoloModelSession? = null
     private var emotionClassifier: PyTorchClassifier? = null
+    private lateinit var selectedEmotionModel: EmotionModelSpec
 
     private val modelLoader by lazy { PyTorchModelLoader(applicationContext) }
     private val openCvReady by lazy { OpenCVLoader.initLocal() }
@@ -81,8 +83,33 @@ class LocalInferenceActivity : AppCompatActivity() {
 
         viewModel = ViewModelProvider(this)[StandaloneInferenceViewModel::class.java]
         bindViews()
+        selectedEmotionModel = modelLoader.selectedModel()
+        updateEmotionGroundTruthOptions()
         renderState()
         setupControls()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val selected = modelLoader.selectedModel()
+        if (selected.id != selectedEmotionModel.id) {
+            selectedEmotionModel = selected
+            viewModel.emotionResults = ""
+            updateEmotionGroundTruthOptions()
+            renderState()
+        }
+    }
+
+    private fun updateEmotionGroundTruthOptions() {
+        if (viewModel.emotionGroundTruth !in selectedEmotionModel.labels) {
+            viewModel.emotionGroundTruth = null
+        }
+        val prompt = resources.getStringArray(R.array.emotion_ground_truth_options).first()
+        emotionGroundTruthSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            listOf(prompt) + selectedEmotionModel.labels
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
     }
 
     private fun bindViews() {
@@ -125,7 +152,7 @@ class LocalInferenceActivity : AppCompatActivity() {
         }
         emotionGroundTruthSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val selected = PyTorchClassifier.emotionLabels.getOrNull(position - 1)
+                val selected = selectedEmotionModel.labels.getOrNull(position - 1)
                 if (selected != viewModel.emotionGroundTruth) {
                     viewModel.emotionGroundTruth = selected
                     viewModel.emotionResults = ""
@@ -150,7 +177,7 @@ class LocalInferenceActivity : AppCompatActivity() {
         emotionSelectionTextView.text = selectionSummary(viewModel.emotionImageUris)
         emotionGroundTruthSpinner.setSelection(
             viewModel.emotionGroundTruth
-                ?.let(PyTorchClassifier.emotionLabels::indexOf)
+                ?.let(selectedEmotionModel.labels::indexOf)
                 ?.takeIf { it >= 0 }
                 ?.plus(1)
                 ?: 0,
@@ -212,6 +239,8 @@ class LocalInferenceActivity : AppCompatActivity() {
                     }
                 }
                 viewModel.ledResults = result.trimEnd()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
                 Log.e(TAG, "Standalone LED inference failed", error)
                 viewModel.ledResults = getString(
@@ -219,13 +248,16 @@ class LocalInferenceActivity : AppCompatActivity() {
                     error.message ?: getString(R.string.unknown_error)
                 )
             } finally {
-                renderState()
-                setControlsEnabled(true)
+                if (activityScope.isActive) {
+                    renderState()
+                    setControlsEnabled(true)
+                }
             }
         }
     }
 
     private fun runEmotionInference() {
+        val requestedModel = selectedEmotionModel
         val groundTruth = viewModel.emotionGroundTruth
         if (viewModel.emotionImageUris.isEmpty()) {
             toast(R.string.select_emotion_images_first)
@@ -243,17 +275,22 @@ class LocalInferenceActivity : AppCompatActivity() {
                 val result = withContext(Dispatchers.IO) {
                     val bitmaps = mutableListOf<Bitmap>()
                     try {
-                        val sequenceUris = sampleSequence(viewModel.emotionImageUris, EMOTION_SEQUENCE_LENGTH)
+                        val classifier = getOrCreateEmotionClassifier(requestedModel)
+                        val sequenceUris = sampleEmotionSequence(
+                            viewModel.emotionImageUris,
+                            classifier.modelSpec.sequenceLength,
+                            padShortSequence = classifier.modelSpec.isLegacy
+                        )
                         sequenceUris.forEach { uri ->
                             bitmaps += decodeBitmap(uri)
                                 ?: throw IllegalArgumentException("Could not decode ${displayName(uri)}")
                         }
-                        val classifier = getOrCreateEmotionClassifier()
                         val (prediction, probabilities) = classifier.classifySequence(bitmaps)
                         val bestIndex = probabilities.indices.maxByOrNull(probabilities::get) ?: 0
                         val confidence = probabilities.getOrElse(bestIndex) { 0f }
                         buildString {
                             appendLine("Emotion Recognition Results")
+                            appendLine("Model: ${classifier.modelSpec.selectionSummary.replace("\n", " / ")}")
                             appendLine("Images selected: ${viewModel.emotionImageUris.size}")
                             appendLine("Frames used by model: ${bitmaps.size}")
                             appendLine("Ground truth: $groundTruth")
@@ -261,7 +298,7 @@ class LocalInferenceActivity : AppCompatActivity() {
                             appendLine("Match: ${if (groundTruth.equals(prediction, true)) "Yes" else "No"}")
                             appendLine()
                             appendLine("Probabilities")
-                            PyTorchClassifier.emotionLabels.forEachIndexed { index, label ->
+                            classifier.labels.forEachIndexed { index, label ->
                                 appendLine("  $label: ${formatPercent(probabilities.getOrElse(index) { 0f })}")
                             }
                         }
@@ -269,16 +306,24 @@ class LocalInferenceActivity : AppCompatActivity() {
                         bitmaps.forEach(Bitmap::recycle)
                     }
                 }
-                viewModel.emotionResults = result.trimEnd()
+                if (requestedModel.id == selectedEmotionModel.id) {
+                    viewModel.emotionResults = result.trimEnd()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
                 Log.e(TAG, "Standalone emotion inference failed", error)
-                viewModel.emotionResults = getString(
-                    R.string.inference_failed_with_reason,
-                    error.message ?: getString(R.string.unknown_error)
-                )
+                if (requestedModel.id == selectedEmotionModel.id) {
+                    viewModel.emotionResults = getString(
+                        R.string.inference_failed_with_reason,
+                        error.message ?: getString(R.string.unknown_error)
+                    )
+                }
             } finally {
-                renderState()
-                setControlsEnabled(true)
+                if (activityScope.isActive) {
+                    renderState()
+                    setControlsEnabled(true)
+                }
             }
         }
     }
@@ -311,9 +356,13 @@ class LocalInferenceActivity : AppCompatActivity() {
         return retained ?: throw CancellationException("Activity was destroyed")
     }
 
-    private fun getOrCreateEmotionClassifier(): PyTorchClassifier {
-        synchronized(modelLock) { emotionClassifier?.let { return it } }
-        val loaded = modelLoader.loadEmotionClassifier()
+    private fun getOrCreateEmotionClassifier(spec: EmotionModelSpec): PyTorchClassifier {
+        synchronized(modelLock) {
+            emotionClassifier?.takeIf { it.modelSpec.id == spec.id }?.let { return it }
+            emotionClassifier?.close()
+            emotionClassifier = null
+        }
+        val loaded = modelLoader.loadEmotionClassifier(spec)
         val retained = synchronized(modelLock) {
             when {
                 !activityScope.isActive -> null
@@ -341,14 +390,6 @@ class LocalInferenceActivity : AppCompatActivity() {
         return contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, options)
         }
-    }
-
-    private fun <T> sampleSequence(items: List<T>, length: Int): List<T> = when {
-        items.size == length -> items
-        items.size > length -> List(length) { index ->
-            items[(index * items.lastIndex.toDouble() / (length - 1)).toInt()]
-        }
-        else -> items + List(length - items.size) { items.last() }
     }
 
     private fun selectionSummary(uris: List<Uri>): String = when (uris.size) {
@@ -416,6 +457,5 @@ class LocalInferenceActivity : AppCompatActivity() {
     private companion object {
         const val TAG = "StandaloneInference"
         const val MAX_DECODED_IMAGE_EDGE = 2_048
-        const val EMOTION_SEQUENCE_LENGTH = 5
     }
 }
