@@ -6,7 +6,6 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.TonemapCurve
-import kotlin.math.max
 
 /** Applies exposure, lighting, and flash preferences to a capture request. */
 class CameraExposureController(
@@ -14,6 +13,13 @@ class CameraExposureController(
     private val preferences: SharedPreferences,
     private val cameraIdProvider: () -> String
 ) {
+    /** Camera preferences are shared by handheld, Cardboard and recording sessions. */
+    fun applySettings(builder: CaptureRequest.Builder?) {
+        applyRollingShutter(builder)
+        applyFlash(builder)
+        applyLighting(builder)
+    }
+
     fun applyRollingShutter(builder: CaptureRequest.Builder?) {
         builder ?: return
         val characteristics = cameraManager.getCameraCharacteristics(cameraIdProvider())
@@ -54,22 +60,6 @@ class CameraExposureController(
             requestedExposure.coerceIn(exposureRange.lower, exposureRange.upper),
             iso
         )
-    }
-
-    fun applyArExposure(builder: CaptureRequest.Builder?): Boolean {
-        builder ?: return false
-        val characteristics = cameraManager.getCameraCharacteristics(cameraIdProvider())
-        if (!characteristics.supportsManualExposure()) return false
-
-        val exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            ?: return false
-        val isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            ?: return false
-        val exposure = (NANOS_PER_SECOND / AR_SHUTTER_FREQUENCY)
-            .coerceIn(exposureRange.lower, exposureRange.upper)
-        val iso = max(isoRange.lower, AR_ISO).coerceAtMost(isoRange.upper)
-        setManualExposure(builder, characteristics, exposure, iso)
-        return true
     }
 
     fun applyFlash(builder: CaptureRequest.Builder?) {
@@ -148,8 +138,6 @@ class CameraExposureController(
         const val NANOS_PER_SECOND = 1_000_000_000L
         const val DEFAULT_SHUTTER_FREQUENCY = 6000
         const val DEFAULT_ISO = 400
-        const val AR_SHUTTER_FREQUENCY = 6000
-        const val AR_ISO = 100
         const val KEY_SHUTTER_SPEED = "shutter_speed"
         const val KEY_MANUAL_ISO = "manual_iso_enabled"
         const val KEY_ISO_VALUE = "iso_value"

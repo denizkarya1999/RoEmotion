@@ -52,4 +52,16 @@
     <string name="inference_failed_with_reason">Inference failed: %1$s</string>
     <string name="unknown_error">Unknown error</string>
     <string name="university_logo_description">University of Michigan-Dearborn logo</string>
+    <string name="cardboard_title">Cardboard AR session</string>
+    <string name="cardboard_setup">Use a viewer with an opening for the rear camera. Place the phone horizontally, with the middle of the screen between the lenses. Both eyes see the same camera image. Hold the viewer’s touch trigger or long-press the screen to exit; Back also exits.
+
+Choose session duration before inserting the phone. Both eye views always fill the screen.</string>
+    <string name="cardboard_minutes">Duration in minutes (1–1440)</string>
+    <string name="cardboard_invalid_duration">Enter 1 to 1440 minutes</string>
+    <string name="cardboard_exit_hint">Hold to exit AR</string>
+    <string name="cardboard_waiting">Waiting for camera…</string>
+    <string name="cardboard_rotate">Rotate phone to landscape</string>
+    <string name="cardboard_starting">Starting in %1$s</string>
+    <string name="cardboard_remaining">%1$d:%2$02d remaining</string>
+    <string name="cardboard_rear_required">Cardboard needs a rear camera.</string>
 </resources>

@@ -16,6 +16,8 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.Lifecycle
 import androidx.preference.ListPreference
+import androidx.preference.SeekBarPreference
+import com.developer27.xemotion.videoprocessing.AppearanceSettings
 import androidx.preference.Preference
 import androidx.preference.PreferenceManager
 import androidx.test.core.app.ActivityScenario
@@ -122,6 +124,45 @@ class EmotionModelPickerInstrumentedTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun appearanceControlsPersistSeparatelyAcrossRecreation() {
+        val ar = AppearanceSettings.Profile(2, 6, 1)
+        val cv = AppearanceSettings.Profile(12, 18, 7)
+        fun edit(mode: AppearanceSettings.Mode, profile: AppearanceSettings.Profile) {
+            requireNotNull(scenario).onActivity { activity ->
+                val fragment = activity.supportFragmentManager.findFragmentById(R.id.settings_container)
+                    as SettingsActivity.SettingsFragment
+                for (field in AppearanceSettings.Field.entries) {
+                    val control = requireNotNull(fragment.findPreference<SeekBarPreference>(AppearanceSettings.key(mode, field)))
+                    assertTrue(control.isEnabled)
+                    assertTrue(control.callChangeListener(profile.value(field)))
+                    control.value = profile.value(field)
+                }
+            }
+        }
+        fun verify(mode: AppearanceSettings.Mode, profile: AppearanceSettings.Profile) {
+            requireNotNull(scenario).onActivity { activity ->
+                val fragment = activity.supportFragmentManager.findFragmentById(R.id.settings_container)
+                    as SettingsActivity.SettingsFragment
+                for (field in AppearanceSettings.Field.entries) {
+                    val key = AppearanceSettings.key(mode, field)
+                    assertEquals(profile.value(field), requireNotNull(fragment.findPreference<SeekBarPreference>(key)).value)
+                    assertEquals(profile.value(field), preferences.getInt(key, -1))
+                }
+                assertEquals(profile, AppearanceSettings.profile(mode))
+            }
+        }
+        edit(AppearanceSettings.Mode.AR, ar)
+        verify(AppearanceSettings.Mode.CV, AppearanceSettings.DEFAULT_CV)
+        requireNotNull(scenario).recreate()
+        verify(AppearanceSettings.Mode.AR, ar)
+        edit(AppearanceSettings.Mode.CV, cv)
+        requireNotNull(scenario).recreate()
+        verify(AppearanceSettings.Mode.CV, cv)
+        verify(AppearanceSettings.Mode.AR, ar)
+        assertEquals(5, Settings.Trace.exportLineThickness)
     }
 
     @Test

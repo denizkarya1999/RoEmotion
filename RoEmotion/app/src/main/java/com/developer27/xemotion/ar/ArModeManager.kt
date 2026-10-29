@@ -1,24 +1,26 @@
 package com.developer27.xemotion.ar
 
-import android.app.Activity
-import android.content.res.ColorStateList
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.os.CountDownTimer
 import android.text.InputType
 import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
-import androidx.core.content.ContextCompat
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.preference.PreferenceManager
 import com.developer27.xemotion.R
 import com.developer27.xemotion.camera.CameraHelper
 import com.developer27.xemotion.databinding.ActivityMainBinding
 
-/** Controls the immersive AR presentation used by the inference pipeline. */
+/** Owns one foreground-only headset session and restores the handheld presentation on exit. */
 class ArModeManager(
-    private val activity: Activity,
+    private val activity: AppCompatActivity,
     private val viewBinding: ActivityMainBinding,
     private val cameraHelper: CameraHelper,
     private val isProcessing: () -> Boolean,
@@ -27,47 +29,77 @@ class ArModeManager(
 ) {
     var isArMode = false
         private set
-
     private var arTimer: CountDownTimer? = null
+    private var setupDialog: AlertDialog? = null
     private var startedProcessingForAr = false
+    private var previousOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+    private var countdown = ""
+    private val preferences = PreferenceManager.getDefaultSharedPreferences(activity)
+    private val backCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = exitArMode()
+    }
+
+    init {
+        activity.onBackPressedDispatcher.addCallback(activity, backCallback)
+        viewBinding.cardboardView.setOnLongClickListener { exitArMode(); true }
+    }
 
     fun promptAndEnterArMode() {
-        val margin = (16 * activity.resources.displayMetrics.density).toInt()
+        if (isArMode || setupDialog?.isShowing == true) return
+        val margin = (24 * activity.resources.displayMetrics.density).toInt()
         val input = EditText(activity).apply {
-            hint = "Minutes"
+            hint = activity.getString(R.string.cardboard_minutes)
             inputType = InputType.TYPE_CLASS_NUMBER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(margin, margin, margin, 0) }
+            setText(preferences.getInt("cardboard_minutes", 5).toString())
+            isSingleLine = true
         }
-
-        AlertDialog.Builder(activity)
-            .setTitle("AR Session Duration")
-            .setMessage("Enter how many minutes to run Inference Mode in AR:")
-            .setView(input)
-            .setPositiveButton("Start") { _, _ ->
+        val content = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(margin, 0, margin, 0)
+            addView(input)
+        }
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle(R.string.cardboard_title)
+            .setMessage(R.string.cardboard_setup)
+            .setView(content)
+            .setPositiveButton("Start", null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        setupDialog = dialog
+        dialog.setOnDismissListener { if (setupDialog === dialog) setupDialog = null }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val minutes = input.text.toString().toLongOrNull()
-                    ?.coerceIn(1L, MAX_AR_MINUTES)
-                    ?: 1L
+                if (minutes == null || minutes !in 1L..MAX_AR_MINUTES) {
+                    input.error = activity.getString(R.string.cardboard_invalid_duration)
+                    return@setOnClickListener
+                }
+                preferences.edit().putInt("cardboard_minutes", minutes.toInt()).apply()
+                dialog.dismiss()
                 enterArMode(minutes * MILLIS_PER_MINUTE)
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
+        dialog.show()
     }
 
     fun enterArMode(durationMillis: Long) {
-        if (isArMode) return
-        isArMode = true
+        if (isArMode || durationMillis <= 0) return
         startedProcessingForAr = !isProcessing()
+        // Starting can fail (permissions, camera, OpenCV, model loading, stop in progress).
+        // Do not strand the user in a blank immersive session when it does.
         if (startedProcessingForAr) onStartProcessing()
-
-        updateArButtonUi(true)
-        setArUiVisibility(true)
-        hideSystemBars()
-        cameraHelper.forceArRollingShutter()
-
-        arTimer?.cancel()
+        if (!isProcessing()) {
+            startedProcessingForAr = false
+            return
+        }
+        isArMode = true
+        previousOrientation = activity.requestedOrientation
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        backCallback.isEnabled = true
+        cameraHelper.refreshCameraSettings()
+        viewBinding.cardboardView.setFrame(null)
+        countdown = viewBinding.countdownText.text.toString()
+        refreshUi()
         arTimer = object : CountDownTimer(durationMillis, 1_000L) {
             override fun onTick(millisUntilFinished: Long) = Unit
             override fun onFinish() = exitArMode()
@@ -79,45 +111,60 @@ class ArModeManager(
         isArMode = false
         arTimer?.cancel()
         arTimer = null
-
+        backCallback.isEnabled = false
+        countdown = ""
+        viewBinding.cardboardView.setFrame(null)
         if (startedProcessingForAr && isProcessing()) onStopProcessing()
         startedProcessingForAr = false
-        cameraHelper.updateShutterSpeed()
-        showSystemBars()
-        setArUiVisibility(false)
-        updateArButtonUi(false)
-    }
-
-    private fun hideSystemBars() {
-        WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-    }
-
-    private fun showSystemBars() {
+        cameraHelper.refreshCameraSettings()
+        activity.requestedOrientation = previousOrientation
+        refreshUi()
+        viewBinding.processedFrameView.visibility = if (isProcessing()) View.VISIBLE else View.GONE
         WindowCompat.getInsetsController(activity.window, activity.window.decorView)
             .show(WindowInsetsCompat.Type.systemBars())
     }
 
-    private fun setArUiVisibility(enabled: Boolean) {
-        viewBinding.titleContainer.visibility = if (enabled) View.GONE else View.VISIBLE
-        viewBinding.settingsButton.visibility = if (enabled) View.GONE else View.VISIBLE
-        viewBinding.aboutButton.visibility = if (enabled) View.GONE else View.VISIBLE
-        viewBinding.zoomButtonContainer.visibility = if (enabled) View.GONE else View.VISIBLE
-        viewBinding.buttonContainer.visibility = if (enabled) View.GONE else View.VISIBLE
-        viewBinding.processedFrameView.visibility = if (enabled || isProcessing()) View.VISIBLE else View.GONE
+    fun setCountdown(text: String) {
+        countdown = text
+        if (isArMode) updateStatus()
     }
 
-    private fun updateArButtonUi(enabled: Boolean) {
-        viewBinding.arModeButton.apply {
-            text = if (enabled) "Exit AR" else "AR Mode"
-            backgroundTintList = ColorStateList.valueOf(
-                ContextCompat.getColor(activity, if (enabled) R.color.red else R.color.green)
-            )
-            setTextColor(ContextCompat.getColor(activity, android.R.color.white))
+    /** Call after ordinary UI updates and after size/configuration changes. */
+    fun refreshUi() {
+        viewBinding.titleContainer.visibility = if (isArMode) View.GONE else View.VISIBLE
+        viewBinding.topControlsContainer.visibility = if (isArMode) View.GONE else View.VISIBLE
+        viewBinding.zoomButtonContainer.visibility = if (isArMode) View.GONE else View.VISIBLE
+        viewBinding.buttonContainer.visibility = if (isArMode) View.GONE else View.VISIBLE
+        viewBinding.cardboardView.visibility = if (isArMode) View.VISIBLE else View.GONE
+        if (isArMode) {
+            viewBinding.processedFrameView.visibility = View.GONE
+            viewBinding.countdownText.visibility = View.GONE
+            hideSystemBars()
+            updateStatus()
         }
+    }
+
+    fun hideSystemBars() {
+        if (!isArMode) return
+        WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    private fun updateStatus() {
+        viewBinding.cardboardView.statusText = when {
+            activity.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE ->
+                activity.getString(R.string.cardboard_rotate)
+            countdown.isNotEmpty() -> activity.getString(R.string.cardboard_starting, countdown)
+            else -> ""
+        }
+    }
+
+    fun onPause() {
+        setupDialog?.dismiss()
+        setupDialog = null
+        exitArMode()
     }
 
     private companion object {

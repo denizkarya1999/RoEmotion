@@ -113,8 +113,9 @@ object Settings {
         var boldness = DEFAULT_BOLDNESS
             private set
 
+        // Compatibility default for drawing callers outside an explicit AR frame.
         val lineThickness: Int
-            get() = boldness * OVERLAY_THICKNESS_MULTIPLIER
+            get() = AppearanceSettings.profile(AppearanceSettings.Mode.CV).traceThickness
 
         val exportLineThickness: Int
             get() = boldness
@@ -126,7 +127,6 @@ object Settings {
         const val MIN_BOLDNESS = 1
         const val MAX_BOLDNESS = 20
         const val DEFAULT_BOLDNESS = 5
-        private const val OVERLAY_THICKNESS_MULTIPLIER = 10
 
         fun updateCollectionTypes(types: Set<Type>) {
             require(types.isNotEmpty()) { "Select at least one trace type." }
@@ -220,6 +220,7 @@ object Settings {
 
     /** Initializes runtime settings from the preferences persisted by SettingsActivity. */
     fun load(preferences: SharedPreferences) {
+        AppearanceSettings.load(preferences)
         val dataCollectionType = runCatching {
             DataCollection.Type.valueOf(
                 preferences.getString(KEY_DATA_COLLECTION_TYPE, DataCollection.Type.WRIST_TRACE.name)

@@ -11,7 +11,7 @@ import org.opencv.imgproc.Imgproc
 // Contour detection utility
 object ContourDetection {
 
-    fun processContourDetection(mat: Mat): Triple<Point?, Rect?, Mat> {
+    fun processContourDetection(mat: Mat, boxThickness: Int = Settings.BoundingBox.boxThickness): Triple<Point?, Rect?, Mat> {
         val contours = mutableListOf<MatOfPoint>()
         val hierarchy = Mat()
         val contourInput = mat.clone()
@@ -57,7 +57,7 @@ object ContourDetection {
                 listOf(targetContour),
                 -1,
                 Settings.BoundingBox.boxColor,
-                Settings.BoundingBox.boxThickness
+                boxThickness
             )
 
             // Compute bounding rectangle

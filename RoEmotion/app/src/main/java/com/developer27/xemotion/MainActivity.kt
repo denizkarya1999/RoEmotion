@@ -5,8 +5,11 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
+import android.hardware.display.DisplayManager
+import android.os.Handler
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -80,6 +83,19 @@ class MainActivity : AppCompatActivity() {
     // UI/control state flags
     private var isFrontCamera = false
     private var displayedProcessedBitmap: Bitmap? = null
+    private var frameGeneration = 0L
+    private var previewRotation = -1
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            val display = viewBinding.viewFinder.display ?: return
+            if (!isActivityResumed || display.displayId != displayId || display.rotation == previewRotation) return
+            previewRotation = display.rotation
+            clearDisplayedFrame()
+            cameraHelper.configurePreviewTransform(viewBinding.viewFinder.width, viewBinding.viewFinder.height)
+        }
+    }
 
     // Required runtime permissions
     private val requiredPermissions = buildList {
@@ -127,11 +143,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+            clearDisplayedFrame()
             cameraHelper.configurePreviewTransform(width, height)
         }
 
         // Stop using the surface and let TextureView release its SurfaceTexture.
         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+            clearDisplayedFrame()
             cameraHelper.closeCamera()
             return true
         }
@@ -252,7 +270,22 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Inference models are still loading.", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            if (arModeManager.isArMode) arModeManager.exitArMode() else arModeManager.promptAndEnterArMode()
+            if (arModeManager.isArMode) {
+                arModeManager.exitArMode()
+            } else {
+                if (!cameraHelper.hasRearCamera()) {
+                    Toast.makeText(this, R.string.cardboard_rear_required, Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                val enter = {
+                    if (isActivityResumed && !isDestroyed) {
+                        if (isFrontCamera) switchCameraNow()
+                        arModeManager.promptAndEnterArMode()
+                    }
+                }
+                // A headset must look outward. Stop a front-camera session before switching.
+                if (isFrontCamera && isRecording) stopProcessingAndRecording(enter) else enter()
+            }
         }
     }
 
@@ -325,11 +358,28 @@ class MainActivity : AppCompatActivity() {
             viewBinding.startProcessingButton.backgroundTintList =
                 ContextCompat.getColorStateList(this, R.color.blue)
         }
+        arModeManager.refreshUi()
+    }
+
+    private fun clearDisplayedFrame() {
+        frameGeneration++
+        viewBinding.cardboardView.setFrame(null)
+        viewBinding.processedFrameView.setImageBitmap(null)
+        displayedProcessedBitmap?.recycle()
+        displayedProcessedBitmap = null
     }
 
     // Start camera-frame processing and the independent inference session
     private fun startProcessingAndRecording() {
         if (isStopping || isCountingDown) return
+        if (!allPermissionsGranted()) {
+            requestRequiredPermissions()
+            return
+        }
+        if (cameraHelper.cameraDevice == null) {
+            Toast.makeText(this, R.string.cardboard_waiting, Toast.LENGTH_SHORT).show()
+            return
+        }
         if (Settings.OperatingMode.current == Settings.OperatingMode.Mode.DATA_COLLECTION) {
             when (Settings.DataCollection.current) {
                 Settings.DataCollection.Type.WRIST_TRACE -> {
@@ -476,6 +526,7 @@ class MainActivity : AppCompatActivity() {
                     .coerceIn(1L, COUNTDOWN_DURATION_SECONDS)
                 val text = value.toString()
                 viewBinding.countdownText.text = text
+                arModeManager.setCountdown(text)
             }
 
             override fun onFinish() {
@@ -488,6 +539,7 @@ class MainActivity : AppCompatActivity() {
                     Settings.DataCollection.current != requestedCollectionType
                 ) return
                 beginProcessingSession(request)
+                if (arModeManager.isArMode && !isRecording) arModeManager.exitArMode()
             }
         }.start()
     }
@@ -503,6 +555,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideCountdownOverlay() {
         viewBinding.countdownText.text = ""
+        arModeManager.setCountdown("")
         viewBinding.countdownText.visibility = View.GONE
     }
 
@@ -531,7 +584,7 @@ class MainActivity : AppCompatActivity() {
         viewBinding.startProcessingButton.text = getString(R.string.stop_processing)
         viewBinding.startProcessingButton.backgroundTintList =
             ContextCompat.getColorStateList(this, R.color.red)
-        viewBinding.processedFrameView.visibility = View.VISIBLE
+        viewBinding.processedFrameView.visibility = if (arModeManager.isArMode) View.GONE else View.VISIBLE
 
         val wristRequest = request as? SessionRequest.WristTrace
         emotionInference.startSession(wristRequest?.userName, wristRequest?.emotion)
@@ -603,9 +656,7 @@ class MainActivity : AppCompatActivity() {
         viewBinding.startProcessingButton.backgroundTintList =
             ContextCompat.getColorStateList(this, R.color.blue)
         viewBinding.processedFrameView.visibility = View.GONE
-        viewBinding.processedFrameView.setImageBitmap(null)
-        displayedProcessedBitmap?.recycle()
-        displayedProcessedBitmap = null
+        clearDisplayedFrame()
         updateOperatingModeUi()
 
         emotionInference.stopSession { savedTraceCount ->
@@ -678,14 +729,20 @@ class MainActivity : AppCompatActivity() {
 
         val bitmap = captureProcessingFrame() ?: return
         isProcessingFrame = true
+        val generation = frameGeneration
+        val renderForAr = arModeManager.isArMode
 
         // Process current frame and update preview output
-        videoProcessor?.processFrame(bitmap) { processedBitmap ->
+        videoProcessor?.processFrame(bitmap, arMode = renderForAr) { processedBitmap ->
             runOnUiThread {
-                if (processedBitmap != null && isProcessing) {
-                    displayedProcessedBitmap?.takeIf { it !== processedBitmap }?.recycle()
+                if (processedBitmap != null && isProcessing && !isDestroyed && generation == frameGeneration &&
+                    renderForAr == arModeManager.isArMode
+                ) {
+                    val previous = displayedProcessedBitmap
                     displayedProcessedBitmap = processedBitmap
                     viewBinding.processedFrameView.setImageBitmap(processedBitmap)
+                    viewBinding.cardboardView.setFrame(if (arModeManager.isArMode) processedBitmap else null)
+                    previous?.takeIf { it !== processedBitmap }?.recycle()
                 } else {
                     processedBitmap?.recycle()
                 }
@@ -742,6 +799,8 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         isActivityResumed = true
+        previewRotation = viewBinding.viewFinder.display?.rotation ?: -1
+        getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, Handler(mainLooper))
         cameraHelper.startBackgroundThread()
         applyOperatingModeConfiguration()
 
@@ -751,13 +810,27 @@ class MainActivity : AppCompatActivity() {
 
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        clearDisplayedFrame()
+        viewBinding.viewFinder.post {
+            cameraHelper.configurePreviewTransform(viewBinding.viewFinder.width, viewBinding.viewFinder.height)
+            arModeManager.refreshUi()
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && ::arModeManager.isInitialized) arModeManager.hideSystemBars()
+    }
+
     // Take actions when another app was opened
     override fun onPause() {
         isActivityResumed = false
+        getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
+        arModeManager.onPause()
         cancelStartCountdown()
-        if (arModeManager.isArMode) {
-            arModeManager.exitArMode()
-        }
+        clearDisplayedFrame()
         if (isRecording) {
             stopProcessingAndRecording()
         }
@@ -782,9 +855,7 @@ class MainActivity : AppCompatActivity() {
         pendingOokVideo = null
         pendingOokVideoFileName = null
         activeSessionType = null
-        viewBinding.processedFrameView.setImageBitmap(null)
-        displayedProcessedBitmap?.recycle()
-        displayedProcessedBitmap = null
+        clearDisplayedFrame()
         emotionInference.close()
         videoProcessor?.close()
         videoProcessor = null

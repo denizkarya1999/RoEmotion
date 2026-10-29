@@ -3,6 +3,7 @@ package com.developer27.xemotion.videoprocessing.contour
 import android.graphics.Bitmap
 import com.developer27.xemotion.videoprocessing.Settings
 import com.developer27.xemotion.videoprocessing.drawing.BoundingBox
+import com.developer27.xemotion.videoprocessing.drawing.OverlayStyle
 import com.developer27.xemotion.videoprocessing.drawing.traces.TraceRenderer
 import org.opencv.android.Utils
 import org.opencv.core.Core
@@ -14,7 +15,7 @@ import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 
 class ContourVideoProcessing(
-    private val drawTopLabel: (Mat, BoundingBox, String, Scalar) -> Unit,
+    private val drawTopLabel: (Mat, BoundingBox, String, Scalar, OverlayStyle) -> Unit,
     private val rawDataList: MutableList<Point>,
     private val smoothDataList: MutableList<Point>
 ) {
@@ -22,7 +23,8 @@ class ContourVideoProcessing(
     fun processFrame(
         bitmap: Bitmap,
         userLabel: String,
-        classificationLabel: String
+        classificationLabel: String,
+        style: OverlayStyle = OverlayStyle.HANDHELD
     ): Bitmap {
         val pMat = Preprocessing.preprocessFrame(bitmap)
         var detectedMat: Mat? = null
@@ -30,7 +32,7 @@ class ContourVideoProcessing(
 
         try {
             // 1) Detect contour and bounding region
-            val detection = ContourDetection.processContourDetection(pMat)
+            val detection = ContourDetection.processContourDetection(pMat, style.boxThickness)
             val center = detection.first
             val boundingRect = detection.second
             detectedMat = detection.third
@@ -62,7 +64,7 @@ class ContourVideoProcessing(
                         Point(box.x1.toDouble(), box.y1.toDouble()),
                         Point(box.x2.toDouble(), box.y2.toDouble()),
                         Settings.BoundingBox.boxColor,
-                        Settings.BoundingBox.boxThickness
+                        style.boxThickness
                     )
                 }
 
@@ -71,21 +73,23 @@ class ContourVideoProcessing(
                         drawMat,
                         box,
                         labelText,
-                        Scalar(255.0, 255.0, 255.0)
+                        Scalar(255.0, 255.0, 255.0),
+                        style
                     )
                 }
             }
 
             // 2) Draw trace (raw + smoothed points)
-            TraceRenderer.drawTrace(center, drawMat, rawDataList, smoothDataList)
+            TraceRenderer.drawTrace(center, drawMat, rawDataList, smoothDataList, style.traceThickness)
 
             // 3) Convert processed Mat back to Bitmap
-            val overlay = Bitmap.createBitmap(drawMat.cols(), drawMat.rows(), Bitmap.Config.ARGB_8888)
+            val overlay = if (bitmap.isMutable && bitmap.config == Bitmap.Config.ARGB_8888) bitmap
+                else Bitmap.createBitmap(drawMat.cols(), drawMat.rows(), Bitmap.Config.ARGB_8888)
             return try {
                 Utils.matToBitmap(drawMat, overlay)
                 overlay
             } catch (error: Throwable) {
-                overlay.recycle()
+                if (overlay !== bitmap) overlay.recycle()
                 throw error
             }
         } finally {
@@ -98,7 +102,8 @@ class ContourVideoProcessing(
     // Builds final label text shown above bounding box
     private fun buildCombinedLabel(
         userLabel: String,
-        classificationLabel: String
+        classificationLabel: String,
+        style: OverlayStyle = OverlayStyle.HANDHELD
     ): String {
         val safeUser = userLabel.trim()
         val safeEmotion = classificationLabel.trim()

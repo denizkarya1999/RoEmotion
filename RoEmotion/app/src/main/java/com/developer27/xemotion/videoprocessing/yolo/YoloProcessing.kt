@@ -7,13 +7,14 @@ import com.developer27.xemotion.inference.YoloLedDetection
 import com.developer27.xemotion.inference.YoloModelSession
 import com.developer27.xemotion.videoprocessing.Settings
 import com.developer27.xemotion.videoprocessing.drawing.BoundingBox
+import com.developer27.xemotion.videoprocessing.drawing.OverlayStyle
 import com.developer27.xemotion.videoprocessing.drawing.traces.TraceRenderer
 import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.core.Point
 
 class YoloProcessing(
-    private val drawUserBoxAndLabel: (Mat, BoundingBox, Int) -> Unit,
+    private val drawUserBoxAndLabel: (Mat, BoundingBox, Int, OverlayStyle) -> Unit,
     private val recordTracePoint: (Int, Point, Int) -> List<Point>,
     private val updateDetectionOrder: (List<Int>) -> Unit
 ) {
@@ -26,24 +27,33 @@ class YoloProcessing(
     // Main YOLO frame processing pipeline
     fun processFrame(
         bitmap: Bitmap,
-        model: YoloModelSession?
+        model: YoloModelSession?,
+        style: OverlayStyle = OverlayStyle.HANDHELD
     ): Bitmap {
         val outputMat = Mat()
         return try {
             Utils.bitmapToMat(bitmap, outputMat)
             if (Settings.DetectionMode.enableYOLOinference && model != null) {
-                detectAndDraw(bitmap, model, outputMat)
+                detectAndDraw(bitmap, model, outputMat, style)
             }
 
-            Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888).also {
-                Utils.matToBitmap(outputMat, it)
+            // The captured preview is mutable: reuse its pixels instead of allocating
+            // another full-resolution bitmap on every frame.
+            val output = if (bitmap.isMutable && bitmap.config == Bitmap.Config.ARGB_8888) bitmap
+                else Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+            try {
+                Utils.matToBitmap(outputMat, output)
+                output
+            } catch (error: Throwable) {
+                if (output !== bitmap) output.recycle()
+                throw error
             }
         } finally {
             outputMat.release()
         }
     }
 
-    private fun detectAndDraw(bitmap: Bitmap, model: YoloModelSession, outputMat: Mat) {
+    private fun detectAndDraw(bitmap: Bitmap, model: YoloModelSession, outputMat: Mat, style: OverlayStyle) {
         val meta = YoloLedDetection.createLetterboxedBitmap(
             srcBitmap = bitmap,
             targetWidth = model.inputWidth,
@@ -84,9 +94,9 @@ class YoloProcessing(
                 val trace = recordTracePoint(classId, centerPoint, TRACE_CAP)
 
                 if (Settings.BoundingBox.enableBoundingBox && box.x2 > box.x1 && box.y2 > box.y1) {
-                    drawUserBoxAndLabel(outputMat, box, classId)
+                    drawUserBoxAndLabel(outputMat, box, classId, style)
                 }
-                TraceRenderer.drawPathInBox(outputMat, box, trace)
+                TraceRenderer.drawPathInBox(outputMat, box, trace, thickness = style.traceThickness)
             }
         } finally {
             if (!letterboxed.isRecycled) letterboxed.recycle()

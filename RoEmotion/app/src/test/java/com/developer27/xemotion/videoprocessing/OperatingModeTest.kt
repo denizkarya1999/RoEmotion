@@ -117,10 +117,14 @@ class OperatingModeTest {
     }
 
     @Test
-    fun traceBoldnessControlsOverlayAndExportThickness() {
+    fun exportBoldnessDoesNotChangeLiveAppearance() {
         Settings.Trace.updateBoldness(7)
         assertEquals(7, Settings.Trace.exportLineThickness)
-        assertEquals(70, Settings.Trace.lineThickness)
+        assertEquals(AppearanceSettings.DEFAULT_CV.traceThickness, Settings.Trace.lineThickness)
+
+        Settings.Trace.updateBoldness(Settings.Trace.DEFAULT_BOLDNESS)
+        assertEquals(5, Settings.Trace.lineThickness)
+        assertEquals(5, Settings.Trace.exportLineThickness)
 
         Settings.Trace.updateBoldness(0)
         assertEquals(Settings.Trace.MIN_BOLDNESS, Settings.Trace.boldness)

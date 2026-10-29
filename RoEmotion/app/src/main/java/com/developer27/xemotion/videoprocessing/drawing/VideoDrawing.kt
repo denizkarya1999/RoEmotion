@@ -30,14 +30,6 @@ class VideoDrawingHelper(
     private val emotionDisplayForUser: (Int) -> UserEmotionDisplay
 ) {
 
-    companion object {
-        private const val FONT_SCALE = 2.0
-        private const val THICKNESS = 3
-        private const val TEXT_MARGIN = 8
-        private const val LABEL_PADDING = 6
-        private const val LABEL_STACK_GAP = 3
-    }
-
     // Ensures bounding box stays within frame boundaries
     private fun clampBoxToFrame(mat: Mat, box: BoundingBox): BoundingBox {
         val maxX = (mat.cols() - 1).coerceAtLeast(0).toFloat()
@@ -59,8 +51,9 @@ class VideoDrawingHelper(
     }
 
     // Draws a label above (or near) the bounding box.
-    fun drawTopLabel(mat: Mat, box: BoundingBox, text: String, color: Scalar) {
-        drawLabel(mat, box, text, color, placeBelow = false)
+    fun drawTopLabel(mat: Mat, box: BoundingBox, text: String, color: Scalar,
+                     style: OverlayStyle = OverlayStyle.HANDHELD) {
+        drawLabel(mat, box, text, color, placeBelow = false, style = style)
     }
 
     private fun drawLabel(
@@ -68,7 +61,8 @@ class VideoDrawingHelper(
         box: BoundingBox,
         text: String,
         color: Scalar,
-        placeBelow: Boolean
+        placeBelow: Boolean,
+        style: OverlayStyle
     ) {
         if (text.isBlank()) return
         if (mat.empty() || mat.cols() <= 0 || mat.rows() <= 0) return
@@ -80,8 +74,8 @@ class VideoDrawingHelper(
         val textSize = Imgproc.getTextSize(
             text,
             Imgproc.FONT_HERSHEY_SIMPLEX,
-            FONT_SCALE,
-            THICKNESS,
+            style.fontScale,
+            style.textThickness,
             baseline
         )
 
@@ -93,8 +87,8 @@ class VideoDrawingHelper(
         val frameHeight = mat.rows()
 
         // Label box dimensions with padding
-        val labelWidthRaw = rawTextWidth + LABEL_PADDING * 2
-        val labelHeightRaw = textHeight + base + LABEL_PADDING * 2
+        val labelWidthRaw = rawTextWidth + style.padding * 2
+        val labelHeightRaw = textHeight + base + style.padding * 2
 
         val labelWidth = labelWidthRaw.coerceAtMost(frameWidth)
         val labelHeight = labelHeightRaw.coerceAtMost(frameHeight)
@@ -106,14 +100,14 @@ class VideoDrawingHelper(
 
         val maxLabelY = (frameHeight - labelHeight).coerceAtLeast(0)
         val labelY = if (placeBelow) {
-            val preferredBelowY = safeBox.y2.toInt() + TEXT_MARGIN
+            val preferredBelowY = safeBox.y2.toInt() + style.margin
             if (preferredBelowY <= maxLabelY) {
                 preferredBelowY
             } else {
                 (safeBox.y2.toInt() - labelHeight).coerceIn(0, maxLabelY)
             }
         } else {
-            val preferredAboveY = safeBox.y1.toInt() - labelHeight - TEXT_MARGIN
+            val preferredAboveY = safeBox.y1.toInt() - labelHeight - style.margin
             if (preferredAboveY >= 0) {
                 preferredAboveY.coerceIn(0, maxLabelY)
             } else {
@@ -138,8 +132,8 @@ class VideoDrawingHelper(
         )
 
         // Compute text origin inside the label box
-        val textX = (rectLeft + LABEL_PADDING).coerceAtMost((frameWidth - 1).coerceAtLeast(0))
-        val textY = (rectBottom - LABEL_PADDING - base).coerceIn(
+        val textX = (rectLeft + style.padding).coerceAtMost((frameWidth - 1).coerceAtLeast(0))
+        val textY = (rectBottom - style.padding - base).coerceIn(
             0,
             (frameHeight - 1).coerceAtLeast(0)
         )
@@ -150,9 +144,9 @@ class VideoDrawingHelper(
             text,
             Point(textX.toDouble(), textY.toDouble()),
             Imgproc.FONT_HERSHEY_SIMPLEX,
-            FONT_SCALE,
+            style.fontScale,
             color,
-            THICKNESS
+            style.textThickness
         )
     }
 
@@ -169,7 +163,8 @@ class VideoDrawingHelper(
         mat: Mat,
         box: BoundingBox,
         labels: InferenceLabelFormatter.Labels,
-        color: Scalar
+        color: Scalar,
+        style: OverlayStyle
     ) {
         val rows = listOfNotNull(labels.user, labels.emotion)
             .map { text ->
@@ -177,16 +172,16 @@ class VideoDrawingHelper(
                 val textSize = Imgproc.getTextSize(
                     text,
                     Imgproc.FONT_HERSHEY_SIMPLEX,
-                    Settings.Inference.labelFontScale,
-                    THICKNESS,
+                    style.fontScale,
+                    style.textThickness,
                     baseline
                 )
                 LabelMetrics(
                     text = text,
                     textWidth = textSize.width.toInt(),
                     baseline = baseline[0],
-                    boxWidth = textSize.width.toInt() + LABEL_PADDING * 2,
-                    boxHeight = textSize.height.toInt() + baseline[0] + LABEL_PADDING * 2
+                    boxWidth = textSize.width.toInt() + style.padding * 2,
+                    boxHeight = textSize.height.toInt() + baseline[0] + style.padding * 2
                 )
             }
         if (rows.isEmpty()) return
@@ -198,12 +193,12 @@ class VideoDrawingHelper(
         val safeBox = clampBoxToFrame(mat, box)
         val sharedWidth = rows.maxOf(LabelMetrics::boxWidth).coerceAtMost(frameWidth)
         val stackHeight = (
-            rows.sumOf(LabelMetrics::boxHeight) + LABEL_STACK_GAP * (rows.size - 1)
+            rows.sumOf(LabelMetrics::boxHeight) + style.stackGap * (rows.size - 1)
         ).coerceAtMost(frameHeight)
         val boxCenterX = ((safeBox.x1 + safeBox.x2) / 2f).toInt()
         val stackLeft = (boxCenterX - sharedWidth / 2)
             .coerceIn(0, (frameWidth - sharedWidth).coerceAtLeast(0))
-        val preferredTop = safeBox.y1.toInt() - TEXT_MARGIN - stackHeight
+        val preferredTop = safeBox.y1.toInt() - style.margin - stackHeight
         var rowTop = preferredTop.coerceIn(0, (frameHeight - stackHeight).coerceAtLeast(0))
 
         rows.forEach { row ->
@@ -220,23 +215,24 @@ class VideoDrawingHelper(
 
             val textX = (stackLeft + (sharedWidth - row.textWidth) / 2)
                 .coerceIn(0, (frameWidth - 1).coerceAtLeast(0))
-            val textY = (rowBottom - LABEL_PADDING - row.baseline)
+            val textY = (rowBottom - style.padding - row.baseline)
                 .coerceIn(0, (frameHeight - 1).coerceAtLeast(0))
             Imgproc.putText(
                 mat,
                 row.text,
                 Point(textX.toDouble(), textY.toDouble()),
                 Imgproc.FONT_HERSHEY_SIMPLEX,
-                Settings.Inference.labelFontScale,
+                style.fontScale,
                 color,
-                THICKNESS
+                style.textThickness
             )
-            rowTop = rowBottom + LABEL_STACK_GAP
+            rowTop = rowBottom + style.stackGap
         }
     }
 
     // Draws bounding box + combined user/emotion label
-    fun drawUserBoxAndLabel(mat: Mat, box: BoundingBox, classId: Int) {
+    fun drawUserBoxAndLabel(mat: Mat, box: BoundingBox, classId: Int,
+                            style: OverlayStyle = OverlayStyle.HANDHELD) {
         if (mat.empty() || mat.cols() <= 0 || mat.rows() <= 0) return
 
         val safeClassId = classId.coerceIn(0, 2)
@@ -258,7 +254,7 @@ class VideoDrawingHelper(
             Point(safeBox.x1.toDouble(), safeBox.y1.toDouble()),
             Point(safeBox.x2.toDouble(), safeBox.y2.toDouble()),
             borderColor,
-            Settings.BoundingBox.boxThickness
+            style.boxThickness
         )
 
         val labels = InferenceLabelFormatter.format(
@@ -268,6 +264,6 @@ class VideoDrawingHelper(
             emotionConfidencePct = emotionDisplay.confidence
         )
 
-        drawCenteredInferenceLabels(mat, safeBox, labels, borderColor)
+        drawCenteredInferenceLabels(mat, safeBox, labels, borderColor, style)
     }
 }

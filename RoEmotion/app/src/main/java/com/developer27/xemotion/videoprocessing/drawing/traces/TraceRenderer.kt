@@ -19,7 +19,8 @@ object TraceRenderer {
         center: Point?,
         contourMat: Mat,
         rawDataList: MutableList<Point>,
-        smoothDataList: MutableList<Point>
+        smoothDataList: MutableList<Point>,
+        thickness: Int = Settings.Trace.lineThickness
     ) {
         val (rawSnapshot, smoothSnapshot) = synchronized(rawDataList) {
             center?.let { detectedCenter ->
@@ -32,10 +33,10 @@ object TraceRenderer {
 
         with(Settings.Trace) {
             if (enableRAWtrace) {
-                drawRawTrace(rawSnapshot, contourMat)
+                drawRawTrace(rawSnapshot, contourMat, thickness = thickness)
             }
             if (enableSPLINEtrace) {
-                drawSplineCurve(smoothSnapshot, contourMat)
+                drawSplineCurve(smoothSnapshot, contourMat, thickness = thickness)
             }
         }
     }

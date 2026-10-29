@@ -121,28 +121,93 @@
             android:entryValues="@array/trace_type_values"
             android:defaultValue="RAW" />
 
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="CV Mode Appearance"
+        android:layout="@layout/preference_category_layout">
         <SeekBarPreference
-            android:key="inference_label_size"
+            android:key="cv_box_thickness"
             android:layout="@layout/preference_seekbar_layout"
-            android:title="Inference Label Size"
-            android:summary="8 = smallest, 20 = largest"
+            android:title="Box Line Thickness"
+            android:summary="CV only"
+            android:defaultValue="10"
+            android:max="20"
+            app:min="1"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+        <SeekBarPreference
+            android:key="cv_text_size"
+            android:layout="@layout/preference_seekbar_layout"
+            android:title="Text Size"
+            android:summary="CV only"
             android:defaultValue="16"
             android:max="20"
-            app:min="8"
+            app:min="4"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+        <SeekBarPreference
+            android:key="cv_trace_thickness"
+            android:layout="@layout/preference_seekbar_layout"
+            android:title="Trace Line Thickness"
+            android:summary="CV only"
+            android:defaultValue="5"
+            android:max="20"
+            app:min="1"
             app:seekBarIncrement="1"
             app:showSeekBarValue="true"
             app:updatesContinuously="true" />
     </PreferenceCategory>
 
     <PreferenceCategory
-        android:title="Trace Appearance"
+        android:title="AR Mode Appearance"
+        android:layout="@layout/preference_category_layout">
+        <SeekBarPreference
+            android:key="ar_box_thickness"
+            android:layout="@layout/preference_seekbar_layout"
+            android:title="Box Line Thickness"
+            android:summary="AR only"
+            android:defaultValue="3"
+            android:max="20"
+            app:min="1"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+        <SeekBarPreference
+            android:key="ar_text_size"
+            android:layout="@layout/preference_seekbar_layout"
+            android:title="Text Size"
+            android:summary="AR only"
+            android:defaultValue="8"
+            android:max="20"
+            app:min="4"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+        <SeekBarPreference
+            android:key="ar_trace_thickness"
+            android:layout="@layout/preference_seekbar_layout"
+            android:title="Trace Line Thickness"
+            android:summary="AR only"
+            android:defaultValue="2"
+            android:max="20"
+            app:min="1"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="Saved Trace Appearance"
         android:layout="@layout/preference_category_layout">
 
         <SeekBarPreference
             android:key="trace_boldness"
             android:layout="@layout/preference_seekbar_layout"
-            android:title="Trace Boldness"
-            android:summary="1 = thinnest, 20 = boldest"
+            android:title="Saved Trace Thickness"
+            android:summary="For saved traces and model inputs; separate from AR and CV display"
             android:defaultValue="5"
             android:max="20"
             app:min="1"

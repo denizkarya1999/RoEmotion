@@ -58,10 +58,19 @@ normalization. The bundled model assets run through PyTorch 1.13.1 for Android.
 - Fully offline model selection and inference
 - Rolling-shutter LED wristband detection and trace extraction
 - Computer Vision and Augmented Reality display modes
+- Independent saved AR/CV box thickness, text size, and trace thickness settings
 - Model switching through the Options screen
 - Persistent model selection across app launches
 - Light and dark themes, including light-blue text on dark Options dialogs
 - Local per-user trace filtering for Kalman Filter + CV models
+
+## Cardboard AR
+
+AR Mode includes a landscape, side-by-side camera display with a paired countdown,
+automatic timeout, and hold-to-exit/Back controls. Both eyes always fill their entire
+half of the screen with a centered crop, without borders, a drawn divider or persistent HUD text. See
+[Cardboard setup and limitations](RoEmotion/docs/cardboard-ar.md) for usage and
+physical-headset checks.
 
 ## Installation
 

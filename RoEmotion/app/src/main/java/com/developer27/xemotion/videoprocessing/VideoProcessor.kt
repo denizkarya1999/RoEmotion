@@ -8,6 +8,7 @@ import org.opencv.android.OpenCVLoader
 import com.developer27.xemotion.inference.YoloModelSession
 import com.developer27.xemotion.videoprocessing.contour.ContourVideoProcessing
 import com.developer27.xemotion.videoprocessing.drawing.BoundingBox
+import com.developer27.xemotion.videoprocessing.drawing.OverlayStyle
 import com.developer27.xemotion.videoprocessing.drawing.VideoDrawingHelper
 import com.developer27.xemotion.videoprocessing.drawing.traces.patterns.KalmanBank
 import com.developer27.xemotion.videoprocessing.yolo.YoloProcessing
@@ -99,8 +100,8 @@ class VideoProcessor {
     // YOLO processing pipeline (lazy initialization)
     private val yoloProcessing by lazy {
         YoloProcessing(
-            drawUserBoxAndLabel = { mat, box: BoundingBox, classId ->
-                drawingHelper.drawUserBoxAndLabel(mat, box, classId)
+            drawUserBoxAndLabel = { mat, box: BoundingBox, classId, style ->
+                drawingHelper.drawUserBoxAndLabel(mat, box, classId, style)
             },
             recordTracePoint = state::appendPerUserTrace,
             updateDetectionOrder = state::recordDetections
@@ -110,8 +111,8 @@ class VideoProcessor {
     // Contour-based processing pipeline (lazy initialization)
     private val contourVideoProcessing by lazy {
         ContourVideoProcessing(
-            drawTopLabel = { mat, box: BoundingBox, text, color ->
-                drawingHelper.drawTopLabel(mat, box, text, color)
+            drawTopLabel = { mat, box: BoundingBox, text, color, style ->
+                drawingHelper.drawTopLabel(mat, box, text, color, style)
             },
             rawDataList = state.rawTrace,
             smoothDataList = state.smoothTrace
@@ -165,6 +166,7 @@ class VideoProcessor {
     // Main async frame processing entry point
     fun processFrame(
         bitmap: Bitmap,
+        arMode: Boolean = false,
         callback: (Bitmap?) -> Unit
     ) {
         if (!isOpenCvReady) {
@@ -174,17 +176,16 @@ class VideoProcessor {
             return
         }
 
-        // Debug: log current rolling shutter configuration
-        Log.d("VideoProcessor", "Current Rolling Shutter Speed = ${Settings.RollingShutter.speedHz} Hz")
-
+        // Snapshot the display mode before dispatch so one frame uses one immutable style.
+        val style = OverlayStyle.capture(arMode)
         // Run processing on background thread
         processingScope.launch {
             var result: Bitmap? = null
             var delivered = false
             try {
                 result = when (Settings.DetectionMode.current) {
-                    Settings.DetectionMode.Mode.CONTOUR -> processFrameInternalCONTOUR(bitmap)
-                    Settings.DetectionMode.Mode.YOLO -> processFrameInternalYOLO(bitmap)
+                    Settings.DetectionMode.Mode.CONTOUR -> processFrameInternalCONTOUR(bitmap, style)
+                    Settings.DetectionMode.Mode.YOLO -> processFrameInternalYOLO(bitmap, style)
                 }
                 withContext(Dispatchers.Main) {
                     delivered = true
@@ -205,36 +206,39 @@ class VideoProcessor {
                     callback(null)
                 }
             } finally {
-                if (!bitmap.isRecycled) bitmap.recycle()
+                // A successful pipeline can return the input bitmap. Ownership then
+                // passes to the display; only discarded inputs/results are recycled here.
+                if (bitmap !== result || !delivered) {
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
                 if (!delivered) result?.takeUnless(Bitmap::isRecycled)?.recycle()
             }
         }
     }
 
-    // YOLO-based detection (runs on IO thread)
-    private suspend fun processFrameInternalYOLO(bitmap: Bitmap): Bitmap =
-        withContext(Dispatchers.IO) {
-            synchronized(traceStateLock) {
-                synchronized(this@VideoProcessor) {
-                    val model = yoloModel
-                    if (model == null) {
-                        yoloProcessing.processFrame(bitmap, null)
-                    } else {
-                        synchronized(model) {
-                            yoloProcessing.processFrame(bitmap, model)
-                        }
+    // Native inference already runs on the processing scope's background worker.
+    private fun processFrameInternalYOLO(bitmap: Bitmap, style: OverlayStyle): Bitmap =
+        synchronized(traceStateLock) {
+            synchronized(this@VideoProcessor) {
+                val model = yoloModel
+                if (model == null) {
+                    yoloProcessing.processFrame(bitmap, null, style)
+                } else {
+                    synchronized(model) {
+                        yoloProcessing.processFrame(bitmap, model, style)
                     }
                 }
             }
         }
 
     // Contour-based detection (no ML)
-    private fun processFrameInternalCONTOUR(bitmap: Bitmap): Bitmap {
+    private fun processFrameInternalCONTOUR(bitmap: Bitmap, style: OverlayStyle): Bitmap {
         return synchronized(traceStateLock) {
             contourVideoProcessing.processFrame(
                 bitmap = bitmap,
                 userLabel = userLabel,
-                classificationLabel = classificationLabel
+                classificationLabel = classificationLabel,
+                style = style
             )
         }
     }

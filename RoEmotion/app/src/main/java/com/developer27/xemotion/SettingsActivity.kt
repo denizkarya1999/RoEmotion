@@ -18,6 +18,7 @@ import com.developer27.xemotion.inference.LocalInferenceActivity
 import com.developer27.xemotion.ui.applySystemBarPadding
 import com.developer27.xemotion.ui.enableRoEmotionEdgeToEdge
 import com.developer27.xemotion.videoprocessing.Settings
+import com.developer27.xemotion.videoprocessing.AppearanceSettings
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -45,6 +46,8 @@ class SettingsActivity : AppCompatActivity() {
     // Fragment that manages all preference settings
     class SettingsFragment : PreferenceFragmentCompat() {
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+            // Migrate before XML inflation can seed the new appearance keys.
+            preferenceManager.sharedPreferences?.let(AppearanceSettings::migrateLegacy)
             // Load preferences from the XML resource.
             setPreferencesFromResource(R.xml.root_preferences, rootKey)
             preferenceManager.sharedPreferences?.let(Settings::load)
@@ -204,13 +207,20 @@ class SettingsActivity : AppCompatActivity() {
                     true
                 }
 
-            findPreference<SeekBarPreference>(Settings.KEY_INFERENCE_LABEL_SIZE)
-                ?.setOnPreferenceChangeListener { _, newValue ->
-                    Settings.Inference.updateLabelSize(
-                        newValue as? Int ?: Settings.Inference.DEFAULT_LABEL_SIZE
-                    )
-                    true
+            for (mode in AppearanceSettings.Mode.entries) {
+                for (field in AppearanceSettings.Field.entries) {
+                    findPreference<SeekBarPreference>(AppearanceSettings.key(mode, field))?.apply {
+                        min = field.minimum
+                        max = field.maximum
+                        value = AppearanceSettings.profile(mode).value(field)
+                        setOnPreferenceChangeListener { _, newValue ->
+                            val selected = newValue as? Int ?: return@setOnPreferenceChangeListener false
+                            AppearanceSettings.update(mode, field, selected)
+                            true
+                        }
+                    }
                 }
+            }
 
             // Prediction Logging listener
             val predLoggingPref = findPreference<SwitchPreference>("enable_prediction_logging")
@@ -258,8 +268,6 @@ class SettingsActivity : AppCompatActivity() {
                     getString(R.string.emotion_model_trace_locked, it.displayName)
                 } ?: "%s"
             }
-            findPreference<SeekBarPreference>(Settings.KEY_INFERENCE_LABEL_SIZE)?.isEnabled =
-                capabilities.inferenceSettingsEnabled
             findPreference<ListPreference>("max_boxes")?.isEnabled =
                 capabilities.inferenceSettingsEnabled
             findPreference<SwitchPreference>("enable_prediction_logging")?.isEnabled =

@@ -345,11 +345,7 @@ class CameraHelper(
             }
             if (!accepted) return
 
-            // Apply any manual or auto exposure logic
-            applyRollingShutter()
-            // Possibly set flash, lighting, zoom
-            applyFlashIfEnabled()
-            applyLightingMode()
+            exposureController.applySettings(captureRequestBuilder)
             applyZoom(currentZoom)
 
             // ----------------------------------------------------------------
@@ -573,9 +569,7 @@ class CameraHelper(
         }
         oldSession?.close()
 
-        applyRollingShutter()
-        applyFlashIfEnabled()
-        applyLightingMode()
+        exposureController.applySettings(captureRequestBuilder)
         applyZoom(currentZoom)
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
         builder.set(
@@ -767,6 +761,13 @@ class CameraHelper(
         return cameraIds.first()
     }
 
+    fun hasRearCamera(): Boolean = runCatching {
+        cameraManager.cameraIdList.any {
+            cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) ==
+                CameraCharacteristics.LENS_FACING_BACK
+        }
+    }.getOrDefault(false)
+
     private fun chooseOptimalSize(choices: Array<Size>): Size {
         check(choices.isNotEmpty()) { "The camera reported no supported output sizes." }
         val targetWidth = 1280
@@ -814,33 +815,12 @@ class CameraHelper(
     }
 
     // ------------------------------------------------------------------------
-    // Rolling shutter & exposure
+    // Shared camera settings
     // ------------------------------------------------------------------------
-    fun applyRollingShutter() {
-        exposureController.applyRollingShutter(captureRequestBuilder)
-    }
-
-    fun forceArRollingShutter() {
-        if (exposureController.applyArExposure(captureRequestBuilder)) submitRepeatingRequest()
-    }
-
-    /**
-     * If user changes shutter speed in settings, we re-apply
-     */
-    fun updateShutterSpeed() {
-        applyRollingShutter()
+    /** Refresh exposure, ISO, flash and lighting without changing the current zoom. */
+    fun refreshCameraSettings() {
+        exposureController.applySettings(captureRequestBuilder)
         submitRepeatingRequest()
-    }
-
-    // ------------------------------------------------------------------------
-    // Flash & Lighting
-    // ------------------------------------------------------------------------
-    fun applyFlashIfEnabled() {
-        exposureController.applyFlash(captureRequestBuilder)
-    }
-
-    fun applyLightingMode() {
-        exposureController.applyLighting(captureRequestBuilder)
     }
 
     // ------------------------------------------------------------------------
